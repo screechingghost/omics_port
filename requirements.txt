@@ -1,0 +1,44 @@
+# Core
+pandas>=2.2
+numpy>=1.26
+scipy>=1.13
+statsmodels>=0.14
+openpyxl>=3.1
+python-calamine>=0.2   # ~20x faster Excel reads than openpyxl; see upload.py
+
+# limma path (2-group comparisons)
+# pylimma: pure-Python limma port, no R install needed -- primary candidate.
+# It's a young package (first release May 2026); keep rpy2 installed alongside
+# it until you've validated pylimma's output against real R limma on your
+# own data (see scripts/compare_limma_backends.py).
+pylimma>=0.1.0
+rpy2>=3.5
+
+# Enrichment
+gseapy>=1.1
+mygene>=3.2
+
+# Plotting
+plotly>=5.22
+seaborn>=0.13
+scikit-learn>=1.5
+kaleido>=0.2.1        # static image export for plotly (PNG/SVG/TIFF)
+
+# UI
+dash>=2.17
+dash-bootstrap-components>=1.6
+dash-daq>=0.5     # ColorPicker component -- neither dcc.Input nor dbc.Input
+                    # allow type="color" in this Dash version (both restrict
+                    # `type` to a fixed Literal set with no "color" option),
+                    # and html.Input doesn't exist at all here.
+flask-caching>=2.3    # server-side store backing for dcc.Store, if main_data is large
+
+# PDF report
+reportlab>=4.2
+
+# DAVID web service client
+requests>=2.32
+
+# Dev tooling
+pytest>=8.2
+ruff>=0.5

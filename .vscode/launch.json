@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dash: Run app",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/omics_app/app.py",
+      "console": "integratedTerminal",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "justMyCode": true
+    },
+    {
+      "name": "Pytest: Current file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-v"],
+      "console": "integratedTerminal",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "justMyCode": true
+    },
+    {
+      "name": "Validate: limma bridge (rpy2)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/validate_limma_bridge.py",
+      "console": "integratedTerminal",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "justMyCode": false
+    }
+  ]
+}
