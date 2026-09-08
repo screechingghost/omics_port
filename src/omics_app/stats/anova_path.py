@@ -1,10 +1,3 @@
-"""
-Port of run_anova_comparison (app_12-02.R, line 4012).
-
-Confirmed from source: this path does NOT use limma. It's a per-protein
-one-way ANOVA via base R's aov(), then Benjamini-Hochberg correction.
-Pure scipy/statsmodels port -- no rpy2 needed here.
-"""
 import numpy as np
 import pandas as pd
 from scipy import stats
