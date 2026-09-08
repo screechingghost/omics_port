@@ -1,125 +1,167 @@
-# Setup
+# Multi-Omics Analysis Suite — Python Port
 
-## 1. Open the project correctly
-Open the **`omics_port/` folder itself** in VS Code (File → Open Folder), not a parent folder —
-the `.vscode/` settings, and the `src` layout (`python.analysis.extraPaths`) assume the folder
-root is the workspace root.
+Python/Dash port of `app_12-02.R`, a Shiny app for proteomics differential expression +
+pathway enrichment. See `data/sample/synthetic_proteomics.xlsx` (generate it with
+`scripts/generate_sample_dataset.py`) for a synthetic dataset with known ground truth, used
+throughout development to validate the pipeline against a known-correct answer.
 
-## 2. Install the recommended extensions
-VS Code will prompt you automatically ("This workspace has extension recommendations") because
-of `.vscode/extensions.json`. Accept it, or open the Extensions panel and search
-`@recommended`. Key ones:
-- **Python** + **Pylance** + **debugpy** — core Python support
-- **Ruff** — linting/formatting (configured to run on save)
-- **R** (REditorSupport.r) — only needed if you want to inspect/run R snippets directly in VS
-  Code while porting; not required to run the app itself.
-- **Jupyter** — handy for interactively comparing R vs. Python output row-by-row during
-  validation.
+## Project status
 
-## 3. Create the virtual environment
+| Tab | Status |
+|---|---|
+| 🏠 Home | ✅ Built |
+| 📁 Data Upload | ✅ Built |
+| ⚖️ Comparisons | ✅ Built (2-group path only — see Known Gaps) |
+| 🎨 Color Mapping | ✅ Built |
+| 🔬 Analysis | ✅ Built (2-group path only — see Known Gaps) |
+| 📊 Visualization | ❌ Not started |
+| 🧬 Enrichment | ❌ Not started |
+| 💾 Download | ❌ Not started |
+| ℹ️ Session Info | ❌ Not started |
+
+## Known gaps — read before trusting output on real data
+
+1. **MBQN normalization needs more validation.** `stats/mbqn.py` implements the actual
+   algorithm (row-median-center → quantile-normalize via `pylimma.normalize.normalize_quantiles`
+   → add median back), replacing the earlier simple-median-centering placeholder. On the
+   synthetic benchmark, swapping in real MBQN caused ground-truth recovery to collapse (35/40 →
+   4/40 true positives, 0 → 18 false positives) compared to the placeholder. The cause isn't
+   confirmed: `normalize_quantiles` itself checks out correctly in isolation (verified with a
+   controlled test), and the algorithm structure matches MBQN's documented approach, but real
+   R's `MBQN` package isn't installable in every environment for a direct side-by-side diff
+   (unlike `limma`, it's not packaged for Ubuntu/apt, and CRAN/Bioconductor may not be reachable
+   depending on your network setup). **Test this against your own real data and compare to the
+   R app's output before trusting Analysis tab numbers.** If it doesn't hold up, reverting to
+   simple median-centering (see git history for `_median_center_normalize` in `pipeline.py`) is
+   a safer interim default.
+2. **ANOVA (multi-group) comparisons aren't wired to a working pipeline.** Comparisons tab
+   collects ANOVA group selections, but Analysis tab shows "not yet supported" for them — the
+   ANOVA path doesn't have per-group abundance columns auto-derived from group flags the way
+   the 2-group path does. `stats/anova_path.py` (pure scipy/statsmodels, no R needed) has the
+   underlying stats logic; it just isn't connected to Comparisons/Analysis yet.
+3. **No manual group-entry fallback.** Comparisons and Color Mapping both assume the uploaded
+   file has "Found in Sample Group" columns. Data without those columns (R's manual-entry path)
+   isn't supported yet.
+4. **"Run All Comparisons" button has no callback.** Only single-comparison "Run Analysis" works.
+
+## Validated and safe to trust
+
+- **The core DEA statistics engine (`stats/pylimma_bridge.py`) has been directly validated
+  against real R limma.** Installed R + the actual `limma` package, ran both on identical data,
+  and diffed every value: **zero difference** in logFC, P.Value, and adj.P.Val (to 8 decimal
+  places), and identical significance calls on all 30 test cases. See "R validation" below for
+  how to reproduce this.
+- Filtering and imputation logic (`data/filtering.py`) is unit-tested and matches R's formulas
+  exactly (including the `max(1, floor(n * ratio))` filter threshold and `set.seed(1)`-equivalent
+  fixed random seed for reproducible imputation).
+- Column auto-detection (`data/columns.py`) is unit-tested against R's `build_main_data_index()`
+  logic.
+
+## 1. Setup
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -e .                   # makes `omics_app` importable from anywhere
 ```
-The `pip install -e .` step is important — without it, running `python src/omics_app/app.py`
-directly fails with `ModuleNotFoundError: No module named 'omics_app'`, because Python only adds
-the script's own folder to the import path, not `src/`. The editable install registers the
-package properly so it works no matter how or where you run it.
 
-Then in VS Code: **Cmd/Ctrl+Shift+P → "Python: Select Interpreter" → `.venv`**. This should
-happen automatically given `python.defaultInterpreterPath` in settings, but confirm it in the
-bottom-right status bar — a wrong interpreter is the single most common source of "why can't it
-find my package" confusion.
+The `pip install -e .` step matters — without it, `python src/omics_app/app.py` fails with
+`ModuleNotFoundError: No module named 'omics_app'`, since Python only adds the script's own
+folder to the import path, not `src/`.
 
-## 4. R + rpy2 setup (only needed for the limma / 2-group path)
-This is the one non-obvious part. `rpy2` needs an actual R installation on your machine —
-installing the `rpy2` pip package alone is not enough.
+In VS Code: **Cmd/Ctrl+Shift+P → "Python: Select Interpreter" → `.venv`** (should happen
+automatically via `.vscode/settings.json`, but confirm in the status bar).
 
-1. Install R (if not already installed):
-   - macOS: `brew install r`
-   - Ubuntu/Debian: `sudo apt install r-base`
-   - Windows: download from https://cran.r-project.org/bin/windows/base/
-2. Install limma inside R itself (one-time, from an R console — not pip):
-   ```r
-   install.packages("BiocManager")
-   BiocManager::install("limma")
-   ```
-3. Confirm `rpy2` can find your R installation. `.vscode/settings.json` sets `R_HOME` for
-   Linux/macOS — **edit the path if yours differs** (check with `R RHOME` in a terminal).
-   On Windows, add `R_HOME` and put `R.dll`'s folder on `PATH` instead; rpy2's own install docs
-   cover the Windows-specific quirks in more detail than is worth duplicating here.
-4. Run the validation script before writing anything else that depends on this bridge:
-   ```bash
-   python scripts/validate_limma_bridge.py
-   ```
-   or use the **"Validate: limma bridge (rpy2)"** debug config (F5, pick it from the dropdown).
-   It runs limma on synthetic data with a known injected effect and reports how many of the
-   20 "real" signals came back significant — if this doesn't run cleanly, fix it now, because
-   every later step in the 2-group path depends on it.
+## 2. Run the app
 
-**Note:** the ANOVA (multi-group) path does *not* need any of this — it's pure
-`scipy`/`statsmodels`. Only skip this section entirely if you're certain you won't touch the
-2-group comparison path yet.
-
-## 4b. Optional: pylimma instead of rpy2 (validate first)
-`pylimma` (`stats/pylimma_bridge.py`) is a pure-Python limma port -- no R install needed at all,
-which would remove the entire rpy2/R setup above. It's a young package (first release May 2026),
-so validate it against the R backend on your real data before relying on it alone:
-```bash
-python scripts/compare_limma_backends.py
-```
-This requires *both* backends installed (R+limma+rpy2, and `pip install pylimma`) since it runs
-the same synthetic data through each and reports the max/mean difference in logFC, P.Value, and
-adj.P.Val, plus which proteins (if any) the two backends disagree on for significance. If the
-differences are within a tolerance you're comfortable with on your actual dataset, switch to
-`pylimma_bridge.py` and drop the R/rpy2 setup entirely; if not, keep the rpy2 path as your
-source of truth.
-
-Note pylimma's `top_table()` returns snake_case columns (`log_fc`, `p_value`, `adj_p_value`),
-already renamed to R's convention (`logFC`, `P.Value`, `adj.P.Val`) inside `pylimma_bridge.py`
-so the rest of the codebase doesn't need to know which backend is in use.
-
-## 5. Run the tests
-```bash
-pytest
-```
-or use the **"Pytest: Current file"** debug config with a test file open, or the Testing panel
-(flask icon) in the sidebar, which Pylance/pytest integration populates automatically once the
-interpreter is set correctly.
-
-## 6. Run the app shell
-Press **F5** with **"Dash: Run app"** selected, or:
 ```bash
 python src/omics_app/app.py
 ```
-Opens on `http://127.0.0.1:8050` with the 9 tabs stubbed out. Fill in `render_tab()` in
-`src/omics_app/app.py` as you port each tab.
+Opens on `http://127.0.0.1:8050`. Generate the synthetic test dataset first if you don't have
+real data yet:
+```bash
+python scripts/generate_sample_dataset.py
+```
+
+## 3. Run the tests
+
+```bash
+pytest
+```
+
+## 4. The stats backend: pylimma (primary, no R needed)
+
+`stats/pylimma_bridge.py` is the active DEA engine — a pure-Python limma port, validated
+against real R limma (see above). No R installation is required for normal development or
+running the app.
+
+`stats/limma_bridge.py` (an `rpy2` → real R `limma` bridge) still exists as optional reference
+tooling, **not used by the active pipeline** (`pipeline.py` only imports `pylimma_bridge`). Keep
+it around if you want to re-run a direct comparison against real R limma on your own data:
+
+```bash
+python scripts/compare_limma_backends.py
+```
+
+This requires R + `limma` + `rpy2` installed (see below) — only needed if you want to
+re-validate, not for normal use.
+
+### Installing R + limma + rpy2 (optional, only for re-validation)
+
+1. Install R: macOS `brew install r`, Ubuntu/Debian `sudo apt install r-base-core`, Windows from
+   CRAN.
+2. Install `limma`. On Debian/Ubuntu, a prebuilt package is available and avoids needing CRAN/
+   Bioconductor network access:
+   ```bash
+   sudo apt install r-bioc-limma
+   ```
+   Otherwise, from an R console: `BiocManager::install("limma")`.
+3. Install `rpy2`: `pip install rpy2`. Note: in some environments `rpy2`'s compiled bindings can
+   hit a native ABI mismatch against the installed R build (`undefined symbol: R_getVar` or
+   similar). If that happens, the most reliable workaround is bypassing `rpy2` entirely — call
+   `Rscript` as a subprocess and exchange data via CSV, which is what `validate_limma_bridge.py`
+   falls back to conceptually if you adapt it that way.
+4. Run `python scripts/validate_limma_bridge.py` to confirm the bridge works before relying on
+   it.
 
 ## Project layout
+
 ```
 omics_port/
-├── .vscode/              # settings, debug configs, extension recommendations
+├── .vscode/
 ├── src/omics_app/
-│   ├── app.py            # Dash entry point, 9-tab shell
-│   ├── data/             # filtering, imputation, column parsing (port first)
+│   ├── app.py              # Dash entry point, sidebar-nav shell, all tabs mounted permanently
+│   ├── server.py           # Flask-Caching instance (large file uploads, not client-side stores)
+│   ├── data/
+│   │   ├── filtering.py    # filter_valids, impute_downshift -- unit tested
+│   │   └── columns.py      # build_main_data_index, extract_group_names_from_columns
 │   ├── stats/
-│   │   ├── anova_path.py     # pure scipy/statsmodels, no R needed
-│   │   └── limma_bridge.py   # rpy2 -> R limma, 2-group path only
-│   ├── enrichment/        # gseapy + DAVID client go here
-│   ├── plotting/          # plotly/seaborn plot generators
-│   └── export/            # Excel/PDF/zip export
+│   │   ├── pipeline.py         # orchestrates the full 2-group DEA pipeline (active path)
+│   │   ├── pylimma_bridge.py   # pure-Python limma -- validated against real R limma
+│   │   ├── mbqn.py             # real MBQN normalization -- needs more validation, see Known Gaps
+│   │   ├── anova_path.py       # pure scipy/statsmodels ANOVA -- not yet wired to UI
+│   │   └── limma_bridge.py     # rpy2 -> real R limma -- optional reference/re-validation only
+│   ├── ui/
+│   │   ├── home.py, upload.py, comparisons.py, colors.py, analysis.py
+│   ├── enrichment/, plotting/, export/    # empty stubs, not started
 ├── scripts/
-│   └── validate_limma_bridge.py
+│   ├── generate_sample_dataset.py     # synthetic data with known ground truth
+│   ├── validate_limma_bridge.py       # sanity-checks the rpy2 bridge (optional)
+│   └── compare_limma_backends.py      # diffs rpy2 vs pylimma on synthetic data (optional)
 ├── tests/
 └── requirements.txt
 ```
 
 ## State management note
-The R app's `rv` (`reactiveValues`) becomes Dash `dcc.Store` components in `app.py`. Dash's
-default store serializes to JSON on the client side — fine for small config values (comparison
-definitions, color mapping) but likely too slow/large for the actual data matrix and DEA results
-if your uploads approach the 200MB limit the R app allows. If you hit that wall, switch those
-specific stores to `storage_type='memory'` backed by `flask-caching` on the server side rather
-than trying to push large DataFrames through the browser.
+
+The R app's `rv` (`reactiveValues`) maps to Dash `dcc.Store` components in `app.py`. Uploaded
+file bytes go through a server-side cache (`server.py`, `flask-caching`) rather than a
+client-side store, since the full base64 file content round-tripping through the browser on
+every callback was the actual cause of slow uploads early on — only a small cache token lives
+in the client-side store now.
+
+All tab panels are built once at startup and stay permanently in the DOM; switching tabs only
+toggles `display: block`/`none` (see `set_active_panel` in `app.py`). This is deliberate —
+destroying and rebuilding tab content on every switch was causing dropdown selections and
+loaded data to reset when navigating away and back.

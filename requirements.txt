@@ -12,7 +12,7 @@ python-calamine>=0.2   # ~20x faster Excel reads than openpyxl; see upload.py
 # it until you've validated pylimma's output against real R limma on your
 # own data (see scripts/compare_limma_backends.py).
 pylimma>=0.1.0
-rpy2>=3.5
+
 
 # Enrichment
 gseapy>=1.1
