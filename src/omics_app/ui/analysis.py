@@ -288,6 +288,7 @@ def _build_results_table(result: dict):
         data=preview.to_dict("records"),
         columns=[{"name": c, "id": c} for c in preview.columns],
         page_size=10,
+        filter_action="native",
         style_table={"overflowX": "auto"},
         style_cell={
             "fontSize": "12px",

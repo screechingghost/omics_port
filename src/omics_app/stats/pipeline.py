@@ -22,6 +22,7 @@ import pandas as pd
 
 from omics_app.data.columns import extract_group_names_from_columns
 from omics_app.data.filtering import filter_valids, impute_downshift
+from omics_app.stats.mbqn import mbqn_median
 from omics_app.stats.pylimma_bridge import run_pylimma_two_group
 
 
@@ -106,7 +107,7 @@ def run_two_group_analysis(
     imputed = impute_downshift(log2_filtered, group_columns, random_state=1)
 
     # 4. Normalization -- see module docstring re: mbqn() gap
-    normalized = _median_center_normalize(imputed)
+    normalized = mbqn_median(imputed)
 
     # Rename normalized columns to distinct names before merging, matching
     # R's dummy_names approach (lines 4395-4402): without this, the

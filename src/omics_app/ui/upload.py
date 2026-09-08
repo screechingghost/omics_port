@@ -815,6 +815,7 @@ def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col):
         ),  # matches R's head(rv$main_data, 100), line 2014
         columns=[{"name": c, "id": c} for c in display_df.columns],
         page_size=10,
+        filter_action="native",
         style_table={"overflowX": "auto"},
         style_as_list_view=False,
         style_cell={
