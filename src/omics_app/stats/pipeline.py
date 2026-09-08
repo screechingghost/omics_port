@@ -189,4 +189,12 @@ def run_two_group_analysis(
         "test_group_name": test_group_name,
         "control_group_name": control_group_name,
         "sig_column": sig_column,
+        # Column-name lists for the normalized abundance data, added for
+        # ui/visualization.py: it needs to reconstruct R's
+        # intensity_matrix (all kept proteins x samples) directly from
+        # this dict's "results_df", and these are the only reliable way
+        # to find those columns again (they're not distinguishable from
+        # metadata/raw-abundance columns by name pattern alone).
+        "test_col_names": test_col_names,
+        "control_col_names": control_col_names,
     }

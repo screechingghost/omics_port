@@ -386,6 +386,13 @@ def run_analysis(
         "test_group_name": result["test_group_name"],
         "control_group_name": result["control_group_name"],
         "sig_column": result["sig_column"],
+        # For ui/visualization.py: which normalized-abundance columns
+        # belong to which group, and the index column name needed to
+        # restore `results` back into a properly-indexed DataFrame
+        # (reset_index() above names that column after rowname_col).
+        "test_col_names": result["test_col_names"],
+        "control_col_names": result["control_col_names"],
+        "rowname_col": rowname_col,
     }
 
     progress = dbc.Alert(

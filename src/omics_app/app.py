@@ -8,7 +8,7 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, dcc, html
 
 from omics_app.server import cache
-from omics_app.ui import analysis, colors, comparisons, home, upload
+from omics_app.ui import analysis, colors, comparisons, home, upload, visualization
 
 app = dash.Dash(
     __name__,
@@ -205,6 +205,7 @@ TAB_LAYOUTS = {
     "comparisons": comparisons.layout,
     "colors": colors.layout,
     "analysis": analysis.layout,
+    "visualization": visualization.layout,
 }
 
 app.layout = html.Div(
