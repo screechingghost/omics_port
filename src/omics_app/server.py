@@ -1,14 +1,3 @@
-"""
-Server-side cache, backing large/transient data that shouldn't round-trip
-through client-side dcc.Store (which serializes to JSON in the browser on
-every callback -- fine for small config values, much too slow for raw
-uploaded file bytes).
-
-Usage: app.py calls cache.init_app(app.server) once at startup. Any
-module needing to stash something large imports `cache` from here
-directly -- avoids a circular import with app.py.
-"""
-
 from flask_caching import Cache
 
 cache = Cache(

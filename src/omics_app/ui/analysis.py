@@ -1,24 +1,3 @@
-"""
-Port of R tabPanel("🔬 Analysis", ...) (app_12-02.R, lines 1046-1129).
-
-Architectural simplification vs. R: R re-derives/lets you re-adjust
-abundance-column auto-detection inside the Analysis tab itself
-(output$analysis_parameters_ui, R line 2728) every time you pick a
-comparison. In this port, that column selection already happened once
-in Comparisons tab's Setup step (abundance_g1/abundance_g2 stored per
-comparison) -- Analysis here just uses those directly. Simpler, no loss
-of correctness, but it does mean: if you want different abundance
-columns for a comparison, go back to Comparisons and re-run Setup,
-rather than adjusting it here.
-
-Known gap: only the "normal" (2-group) method is wired to a working
-pipeline (stats/pipeline.py, verified against synthetic data with known
-ground truth -- 34/34 recovered significant proteins were true
-positives). ANOVA comparisons show a "not yet supported" message
-instead of running, since the ANOVA path doesn't yet have per-group
-abundance columns collected in Comparisons (documented gap there too).
-"""
-
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import Input, Output, State, callback, dash_table, dcc, html
@@ -157,7 +136,7 @@ def layout() -> html.Div:
     Input("store-comparisons", "data"),
 )
 def populate_analysis_comparison_selector(comparisons_data):
-    """Port of output$analysis_comparison_selector (R line 2721)."""
+
     comparisons = (comparisons_data or {}).get("comparisons") or []
     if not comparisons:
         return [], None
@@ -166,12 +145,7 @@ def populate_analysis_comparison_selector(comparisons_data):
 
 
 def _build_top5_table(result: dict):
-    """Port of R lines 5381-5392: Top 5 Most Significant. Always drawn
-    from the p-value-significant set (not whichever sig_column is used
-    for the main table/filter), matching R exactly. R relies on
-    results$significant_pvalue already being sorted by limma's
-    topTable() default order; sorted explicitly here by P.Value
-    ascending instead of assuming pylimma's output order matches."""
+
     df = result["results_df"]
     pvalue_sig_df = df[df["Significance_pvalue"]]
     if pvalue_sig_df.empty:
@@ -197,7 +171,7 @@ def _build_top5_table(result: dict):
 
 
 def _build_summary(result: dict, comp_name: str, params: dict) -> html.Div:
-    """Port of output$analysis_results_summary (R lines 5314-5395)."""
+
     fc_op_labels = {"gte": "≥", "gt": ">", "lte": "≤", "lt": "<", "abs": "|FC| ≥"}
     fc_line = "Fold Change Filter: None (all fold changes included)"
     if params["fc_operator"] != "none" and params["fc_threshold"] > 0:
@@ -332,7 +306,7 @@ def run_analysis(
     fc_operator,
     existing_dea_results,
 ):
-    """Port of observeEvent(input$run_analysis_btn, ...) (R line 4339)."""
+
     # User-info gate, matching R lines 4342-4349
     user_name = ((app_config or {}).get("user_name") or "").strip()
     user_id = ((app_config or {}).get("user_id") or "").strip()

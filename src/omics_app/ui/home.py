@@ -1,8 +1,3 @@
-"""
-Port of R tabPanel("🏠 Home", ...) (app_12-02.R, lines 781-899) and its
-server-side logic (output$home_status_message, lines 1860-1890).
-"""
-
 import dash_bootstrap_components as dbc
 from dash import Input, Output, callback, dcc, html
 
@@ -215,12 +210,6 @@ def layout() -> html.Div:
     Input("user-id", "value"),
 )
 def sync_app_config(analysis_type, comparison_method, user_name, user_id):
-    """
-    Home tab's own inputs get unmounted when the user switches tabs
-    (tab-content is replaced wholesale), so anything other tabs need
-    (comparison_method, in particular) has to be mirrored into an
-    app-level store here.
-    """
     return {
         "analysis_type": analysis_type,
         "comparison_method": comparison_method,
@@ -237,7 +226,6 @@ def sync_app_config(analysis_type, comparison_method, user_name, user_id):
     Input("user-id", "value"),
 )
 def render_status_message(analysis_type, comparison_method, user_name, user_id):
-    """Port of output$home_status_message (lines 1860-1890)."""
     user_name = (user_name or "").strip()
     user_id = (user_id or "").strip()
     has_user_info = bool(user_name) and bool(user_id)

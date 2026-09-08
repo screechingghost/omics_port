@@ -1,20 +1,3 @@
-"""
-Port of R tabPanel("📁 Data Upload", ...) (app_12-02.R, lines 904-963).
-
-Server-side logic this replaces: the file-load reactive chain that
-reads the uploaded Excel file, lets the user pick a sheet and row-name
-column, then calls build_main_data_index() to auto-classify columns.
-
-Performance note: uploaded file bytes are cached server-side (see
-omics_app.server.cache) and referenced by a small token in dcc.Store,
-rather than shuttling the full base64-encoded file through the browser
-on every callback. The earlier version stored raw base64 content
-directly in a client-side dcc.Store, which meant the whole file got
-re-serialized/re-sent on every step (upload -> sheet select -> load
-click) -- the actual cause of slow-feeling uploads, worse the larger
-the file.
-"""
-
 import base64
 import io
 import uuid
@@ -493,8 +476,6 @@ def layout() -> html.Div:
                     width=12,
                 )
             ),
-            # Small token only -- the actual decoded file bytes live in the
-            # server-side cache (see omics_app.server.cache), not here.
             dcc.Store(id="store-uploaded-file-content"),
         ]
     )
@@ -514,23 +495,12 @@ def _format_file_size(size_bytes: int) -> str:
 
 
 def _read_excel_fast(file_like, **kwargs):
-    """
-    python-calamine reads Excel files roughly 20x faster than the
-    default openpyxl engine (measured: 278ms vs 14ms on a 500-row test
-    file, and the gap widens on larger files) since it's a Rust parser
-    rather than pure Python. Falls back to openpyxl automatically if
-    python-calamine isn't installed, so this never hard-fails.
-    """
+
     try:
         return pd.read_excel(file_like, engine="calamine", **kwargs)
     except ImportError:
         file_like.seek(0)
         return pd.read_excel(file_like, engine="openpyxl", **kwargs)
-
-
-# --- Gate: require user name + ID (set on the Home tab) before allowing
-# any upload action, mirroring the R app's "User information required"
-# warning on Home, but enforced here where it actually blocks progress.
 
 
 def _has_user_info(app_config: dict | None) -> bool:
@@ -574,13 +544,7 @@ def gate_upload_on_user_info(app_config):
     State("replace-file-upload", "filename"),
 )
 def on_file_uploaded(main_contents, replace_contents, main_filename, replace_filename):
-    """
-    Reads sheet names as soon as a file is dropped. The decoded bytes go
-    into the server-side cache under a short-lived token; only that
-    token (plus the filename) goes into the client-side dcc.Store, so
-    the large file content never round-trips through the browser again
-    on subsequent callbacks (sheet select, load click).
-    """
+
     triggered_id = ctx.triggered_id
 
     if triggered_id == "replace-file-upload":
@@ -680,9 +644,6 @@ def on_file_uploaded(main_contents, replace_contents, main_filename, replace_fil
     prevent_initial_call=True,
 )
 def on_sheet_selected(sheet_name, stored_file):
-    """Reads column headers for the chosen sheet and populates
-    rowname-selector's options (component always exists -- see note in
-    on_file_uploaded above)."""
     if not stored_file or not sheet_name:
         return [], None
 
@@ -698,10 +659,6 @@ def on_sheet_selected(sheet_name, stored_file):
 
 
 def _column_badge_row(label: str, columns: list[str], accent: str) -> html.Div:
-    """One labeled row of badge chips -- used for group/abundance/metadata
-    column lists in the Dataset Information panel. Chips scan much
-    faster than a long comma-separated sentence, especially once a
-    real file has 20+ abundance columns."""
     if not columns:
         chips = html.Span("none detected", style={"color": "var(--muted)", "fontSize": "13px"})
     else:
@@ -735,8 +692,6 @@ def _column_badge_row(label: str, columns: list[str], accent: str) -> html.Div:
 
 
 def _info_stat(label: str, value, accent: str) -> dbc.Col:
-    """One stat block in the Dataset Information panel -- colored to
-    match the accent system used elsewhere (indigo/teal/coral/amber)."""
     return dbc.Col(
         html.Div(
             [
@@ -775,20 +730,7 @@ def _info_stat(label: str, value, accent: str) -> dbc.Col:
     prevent_initial_call=True,
 )
 def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col):
-    """
-    Port of the "Load Data" action -- reads the full sheet, runs
-    build_main_data_index() for column auto-detection, and populates
-    the preview table + dataset info panel.
 
-    Also clears store-comparisons (Output #4) on every successful load.
-    Any comparisons configured against a *previous* file reference that
-    file's group/abundance column names -- silently leaving them in
-    place after a new file loads is what let stale dropdown values
-    reach Comparisons' rebuilt dropdowns with a new, non-matching
-    options list (see the note in comparisons.py's _comparison_card
-    for the resulting "Cannot read properties of null" crash this
-    caused in the browser).
-    """
     if not stored_file or not sheet_name:
         return None, None, dbc.Alert("No file loaded yet.", color="secondary"), None
 
@@ -810,9 +752,7 @@ def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col):
     column_index = build_main_data_index(display_df)
 
     preview = dash_table.DataTable(
-        data=display_df.head(100).to_dict(
-            "records"
-        ),  # matches R's head(rv$main_data, 100), line 2014
+        data=display_df.head(100).to_dict("records"),
         columns=[{"name": c, "id": c} for c in display_df.columns],
         page_size=10,
         filter_action="native",
@@ -863,7 +803,6 @@ def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col):
         ]
     )
 
-    # Stored for downstream tabs (Comparisons, Analysis, etc.) to consume.
     store_payload = {
         "filename": stored_file["filename"],
         "sheet_name": sheet_name,
@@ -884,11 +823,7 @@ def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col):
     prevent_initial_call=True,
 )
 def on_load_sig_results_clicked(n_clicks, contents, filename, existing_dea_results):
-    """
-    Port of observeEvent(input$load_sig_btn, ...) (R line 1986). Loads a
-    pre-existing tab-separated significant-results file for
-    visualization-only use, without running a new DEA.
-    """
+
     if contents is None:
         return existing_dea_results, dbc.Alert(
             "Please choose a file before clicking Load.", color="warning"

@@ -1,17 +1,3 @@
-"""
-Port of R tabPanel("⚖️ Comparisons", ...) (app_12-02.R, lines 968-1010)
-and its server logic (metadata_cols_selector: 2053, comparisons_setup_ui:
-2222, setup_comparisons_btn handler: 2324, auto-detect abundance columns
-from group selection: 2480-2542).
-
-Known simplification vs. the R app: the "no 'Found in Sample Group'
-columns detected, enter everything manually" fallback path (R lines
-2271-2287, 2306-2316) isn't ported yet -- this assumes group_cols is
-non-empty, which is the common case for real Proteome Discoverer
-exports. Add the manual-entry fallback if you hit real data without
-those columns.
-"""
-
 import re
 
 import dash_bootstrap_components as dbc
@@ -162,22 +148,7 @@ def clear_metadata(n_clicks):
 
 
 def _comparison_card(i: int, group_cols: list[str], abundance_cols: list[str], method: str):
-    """
-    IMPORTANT: every dropdown below explicitly sets value=None (or []
-    for multi-selects), even though that's the default anyway. This
-    card gets rebuilt from scratch whenever store-main-data changes
-    (a new file is uploaded) -- if a dropdown's `value` prop were
-    simply omitted instead of explicitly reset, Dash treats "prop not
-    present in this render" as "don't change it", not "reset it". A
-    dropdown that previously had a value selected from an older
-    upload would then keep that stale value while receiving a NEW
-    `options` list (from the new file) that may no longer contain it.
-    react-select then fails to find the matching option object to
-    display and throws "Cannot read properties of null (reading
-    'label')" in the browser. Explicit value=None/[] here closes that
-    gap regardless of whether Dash/React happens to reuse the
-    underlying component instance across renders.
-    """
+
     header = html.Div(
         [
             html.H5(f"Comparison {i}", style={"color": "#2c3e50"}),
@@ -276,9 +247,6 @@ def render_comparison_cards(n_comparisons, main_data, app_config):
 
 
 # --- Auto-detect abundance columns from group selection --------------------
-# Port of the observeEvent pair at R lines 2505-2535: when a group is
-# picked, pre-fill the abundance-column selector by matching the group
-# name as a substring of the abundance column names.
 
 
 def _auto_match_abundance(group_col: str | None, abundance_cols: list[str]) -> list[str]:
@@ -349,19 +317,7 @@ def setup_comparisons(
     app_config,
     main_data,
 ):
-    """Port of observeEvent(input$setup_comparisons_btn, ...) (R line 2324).
 
-    Also precomputes each comparison's selected_cols (R line 2380-2397:
-    metadata + group + abundance columns actually used), matching the R
-    app's approach of freezing rv$comparison_list at Setup time rather
-    than recomputing it live when previewed.
-
-    Known simplification for the ANOVA path: R auto-derives per-group
-    abundance columns from "Found in Sample Group" flags (not yet
-    ported -- see comparisons_setup_ui docstring); the preview for
-    ANOVA comparisons here shows metadata + the selected group columns
-    only, not their underlying abundance columns.
-    """
     method = (app_config or {}).get("comparison_method") or "normal"
     metadata_cols = metadata_cols or []
     all_columns = list(main_data["data"][0].keys()) if main_data and main_data.get("data") else []
@@ -416,8 +372,6 @@ def setup_comparisons(
 
 
 # --- Comparison Preview: pick a comparison, see the column-sliced data
-# that would actually feed into it. Port of output$comparison_preview_selector
-# (R line 2624) and output$comparison_preview_table (R line 2630).
 
 
 @callback(

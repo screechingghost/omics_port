@@ -1,25 +1,3 @@
-"""
-Port of R tabPanel("🎨 Color Mapping", ...) (app_12-02.R, lines 1015-1041)
-and its server logic:
-  output$color_mapping_ui      (line 2640) -- one color picker per group
-  observeEvent(input$save_colors_btn, ...) (line 2661)
-  output$color_preview_plot    (line 2681) -- ggplot bar, one bar per group
-  output$color_mapping_summary (line 2704)
-
-Groups shown here come from get_all_defined_groups() (R line 2197). Known
-simplification, consistent with comparisons.py: that R function also
-pulls in manually-defined ANOVA/2-group names for data without "Found in
-Sample Group" columns -- not ported yet, so this only surfaces groups
-derived from group_cols via extract_group_names_from_columns().
-
-Color input uses dash_daq.ColorPicker rather than a raw HTML5
-<input type="color">, since neither dcc.Input nor dbc.Input allow
-type="color" in this Dash version (both restrict `type` to a fixed set
-with no "color" option), and html.Input doesn't exist in this Dash
-version at all (dash.html deliberately omits it to avoid colliding
-with dash.Input, the callback dependency class).
-"""
-
 import dash_bootstrap_components as dbc
 import dash_daq as daq
 import plotly.graph_objects as go
@@ -28,9 +6,6 @@ from dash.exceptions import PreventUpdate
 
 from omics_app.data.columns import extract_group_names_from_columns
 
-# Same palette R cycles through (line 2652-2653), assigned deterministically
-# by index here rather than R's random sample -- makes the default
-# assignment reproducible/testable instead of changing on every reload.
 DEFAULT_PALETTE = ["#3498db", "#e74c3c", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c"]
 
 
@@ -81,8 +56,7 @@ def layout() -> html.Div:
 
 
 def _sanitize(group: str) -> str:
-    """Mirrors R's gsub("[^A-Za-z0-9]", "_", group) used to build safe
-    input ids from arbitrary group names."""
+
     return "".join(c if c.isalnum() else "_" for c in group)
 
 
@@ -91,7 +65,7 @@ def _sanitize(group: str) -> str:
     Input("store-main-data", "data"),
 )
 def populate_color_mapping_ui(main_data):
-    """Port of output$color_mapping_ui (R line 2640)."""
+
     if not main_data:
         raise PreventUpdate
 
@@ -100,8 +74,6 @@ def populate_color_mapping_ui(main_data):
 
     if not groups:
         return html.P(
-            "No groups found yet. For data without group columns, create "
-            "manual groups in the Comparisons tab and click Setup Comparisons.",
             style={"color": "var(--muted)"},
         )
 
@@ -188,9 +160,7 @@ def populate_color_mapping_ui(main_data):
     prevent_initial_call=True,
 )
 def toggle_color_picker(n_clicks, current_style):
-    """Clicking a group's swatch shows/hides its picker -- keeps only
-    the picker(s) actually in use visible, instead of every group's
-    full ColorPicker widget being permanently expanded."""
+
     is_visible = (current_style or {}).get("display") == "block"
     new_style = dict(current_style or {})
     new_style["display"] = "none" if is_visible else "block"
@@ -205,8 +175,7 @@ def toggle_color_picker(n_clicks, current_style):
     prevent_initial_call=True,
 )
 def sync_swatch_with_picker(value, current_style):
-    """Keeps the compact swatch button and hex label in sync as soon as
-    a color is picked, without needing to close the popover first."""
+
     hex_color = (value or {}).get("hex", "#CCCCCC")
     new_style = dict(current_style or {})
     new_style["backgroundColor"] = hex_color
