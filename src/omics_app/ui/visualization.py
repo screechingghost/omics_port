@@ -31,13 +31,25 @@ for the full list of simplifications within each plot):
   - ANOVA comparisons show a placeholder message in every plot slot,
     same as ui/analysis.py -- consistent with the rest of the port
     (see stats/anova_path.py's docstring for that broader gap).
+
+Layout: one plot per tab (Volcano / Heatmap / PCA / Boxplot /
+Correlation) with a compact settings toolbar for just that plot above
+a large full-width graph, rather than R's fixed 3-row grid of all 5
+plots at once (R lines 1322-1376) with every control for every plot
+crammed into one sidebar. This is a deliberate restructuring, not a
+1:1 port of the R layout -- the underlying settings, callbacks, and
+plot logic are unchanged.
 """
+
+import io
 
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 from dash import Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
+from PIL import Image
 
 from omics_app.plotting.boxplot import build_boxplot_figure
 from omics_app.plotting.correlation import build_correlation_figure
@@ -51,6 +63,27 @@ def _empty_figure(message: str) -> go.Figure:
     fig.add_annotation(text=message, showarrow=False, font=dict(size=14))
     fig.update_layout(xaxis_visible=False, yaxis_visible=False, template="plotly_white")
     return fig
+
+
+def _figure_to_tiff_bytes(
+    figure: dict, width: int = 1600, height: int = 1200, scale: float = 2.0
+) -> bytes:
+    """
+    Port of save_ggplot_tiff / tiff_export_spec, used by every
+    download_<plot> handler in the R app (e.g. output$download_volcano,
+    line 5889) -- renders the currently-displayed Plotly figure to TIFF
+    bytes for download.
+
+    Requires `kaleido` (Plotly's static-image renderer) and `Pillow`
+    (PNG -> TIFF conversion, since Kaleido itself doesn't emit TIFF) --
+    add both to requirements.txt if they're not already there.
+    """
+    fig = go.Figure(figure)
+    png_bytes = pio.to_image(fig, format="png", width=width, height=height, scale=scale)
+    image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+    buffer = io.BytesIO()
+    image.save(buffer, format="TIFF")
+    return buffer.getvalue()
 
 
 def _load_comparison(dea_results: dict | None, comp_name: str | None):
@@ -93,189 +126,370 @@ def _load_comparison(dea_results: dict | None, comp_name: str | None):
     }
 
 
-def layout() -> html.Div:
-    settings = dbc.Card(
-        dbc.CardBody(
-            [
-                html.H4("Plot Settings"),
-                dcc.Dropdown(id="viz-comp-select", options=[], value=None, clearable=False),
-                html.Hr(),
-                html.H5("🌋 Volcano Plot"),
-                dbc.Label("P-value cutoff:"),
-                dbc.Input(
-                    id="volcano-pval", type="number", value=0.05, min=0.001, max=0.1, step=0.005
-                ),
-                dbc.Label("Fold Change cutoff:", className="mt-2"),
-                dbc.Input(id="volcano-fc", type="number", value=0, min=0, max=5, step=0.5),
-                dbc.Label("Top genes to label:", className="mt-2"),
-                dbc.Input(id="volcano-top-n", type="number", value=10, min=0, max=50),
-                dbc.Label("Label Mode:", className="mt-2"),
-                dcc.Dropdown(
-                    id="volcano-label-mode",
-                    options=[
-                        {"label": "Protein symbol/name", "value": "symbol"},
-                        {"label": "Accession IDs", "value": "accession"},
-                        {"label": "Full protein names", "value": "fullname"},
-                        {"label": "No labels", "value": "none"},
-                    ],
-                    value="fullname",
-                    clearable=False,
-                ),
-                html.Hr(),
-                html.H5("🔥 Heatmap"),
-                dbc.Label("Heatmap Type:"),
-                dcc.Dropdown(
-                    id="heatmap-mode",
-                    options=[
-                        {"label": "All significant proteins", "value": "all"},
-                        {"label": "Top upregulated proteins", "value": "up"},
-                        {"label": "Top downregulated proteins", "value": "down"},
-                        {"label": "Top up + down proteins", "value": "both"},
-                    ],
-                    value="all",
-                    clearable=False,
-                ),
-                dbc.Label("Top proteins to display:", className="mt-2"),
-                dbc.Input(id="heatmap-top-n", type="number", value=50, min=1, max=10000),
-                dbc.Checklist(
-                    id="heatmap-toggles",
-                    options=[
-                        {"label": "Scale data", "value": "scale"},
-                        {"label": "Cluster rows (proteins)", "value": "cluster_rows"},
-                        {"label": "Cluster columns (samples)", "value": "cluster_cols"},
-                        {"label": "Show protein names", "value": "show_names"},
-                    ],
-                    value=["scale", "cluster_rows", "cluster_cols", "show_names"],
-                    switch=True,
-                    className="mt-2",
-                ),
-                dbc.Label("Row clustering distance:", className="mt-2"),
-                dcc.Dropdown(
-                    id="heatmap-row-distance",
-                    options=[
-                        {"label": d.capitalize(), "value": d}
-                        for d in [
-                            "euclidean",
-                            "pearson",
-                            "spearman",
-                            "kendall",
-                            "manhattan",
-                            "canberra",
-                            "maximum",
-                        ]
-                    ],
-                    value="euclidean",
-                    clearable=False,
-                ),
-                dbc.Label("Column clustering distance:", className="mt-2"),
-                dcc.Dropdown(
-                    id="heatmap-col-distance",
-                    options=[
-                        {"label": d.capitalize(), "value": d}
-                        for d in [
-                            "euclidean",
-                            "pearson",
-                            "spearman",
-                            "kendall",
-                            "manhattan",
-                            "canberra",
-                            "maximum",
-                        ]
-                    ],
-                    value="euclidean",
-                    clearable=False,
-                ),
-                html.Hr(),
-                html.H5("📊 PCA Plot"),
-                dbc.Label("PC X-axis:"),
-                dbc.Input(id="pca-pc1", type="number", value=1, min=1, max=10),
-                dbc.Label("PC Y-axis:", className="mt-2"),
-                dbc.Input(id="pca-pc2", type="number", value=2, min=1, max=10),
-                dbc.Checklist(
-                    id="pca-toggles",
-                    options=[
-                        {"label": "Show 95% confidence ellipses", "value": "ellipses"},
-                        {"label": "Show sample labels", "value": "labels"},
-                    ],
-                    value=["ellipses", "labels"],
-                    switch=True,
-                    className="mt-2",
-                ),
-                html.Hr(),
-                html.H5("📦 Boxplot"),
-                dbc.Label("Plot Style:"),
-                dcc.Dropdown(
-                    id="boxplot-style",
-                    options=[
-                        {"label": "Violin Plot", "value": "violin"},
-                        {"label": "Traditional Boxplot", "value": "traditional"},
-                    ],
-                    value="violin",
-                    clearable=False,
-                ),
-                html.Hr(),
-                html.H5("🔗 Correlation"),
-                dbc.Label("Method:"),
-                dcc.Dropdown(
-                    id="correlation-method",
-                    options=[
-                        {"label": "Pearson", "value": "pearson"},
-                        {"label": "Spearman", "value": "spearman"},
-                        {"label": "Kendall", "value": "kendall"},
-                    ],
-                    value="pearson",
-                    clearable=False,
-                ),
-                dbc.Checklist(
-                    id="correlation-toggles",
-                    options=[{"label": "Show correlation coefficients", "value": "show_values"}],
-                    value=["show_values"],
-                    switch=True,
-                    className="mt-2",
-                ),
-            ]
-        ),
-        className="card-accent-indigo",
+def _control(label: str, component, width=2) -> dbc.Col:
+    """One labeled control in a settings toolbar -- small caption label
+    above a compact input, laid out inline instead of the previous
+    stacked full-width sidebar controls."""
+    return dbc.Col(
+        [
+            dbc.Label(
+                label,
+                style={
+                    "fontSize": "10.5px",
+                    "fontWeight": "700",
+                    "color": "var(--muted)",
+                    "textTransform": "uppercase",
+                    "letterSpacing": "0.04em",
+                    "marginBottom": "4px",
+                },
+            ),
+            component,
+        ],
+        width=width,
     )
 
-    def _plot_card(title, graph_id):
-        placeholder = _empty_figure("Run Analysis on a comparison first.")
-        return dbc.Card(
-            dbc.CardBody([html.H5(title), dcc.Loading(dcc.Graph(id=graph_id, figure=placeholder))]),
-            className="mb-3",
-        )
 
-    return dbc.Row(
+def _plot_panel(
+    title: str, icon: str, controls: list, graph_id: str, accent: str = "indigo"
+) -> html.Div:
+    """One plot's full content: a compact settings toolbar (only that
+    plot's own controls -- not every control for every plot at once)
+    followed by a large, full-width graph and a TIFF download button
+    (port of R's per-plot downloadButton, e.g. line 5889)."""
+    placeholder = _empty_figure("Run Analysis on a comparison first.")
+    return html.Div(
         [
-            dbc.Col(settings, width=3),
-            dbc.Col(
-                [
-                    dbc.Row(
-                        [
-                            dbc.Col(_plot_card("Volcano Plot", "plot-volcano"), width=6),
-                            dbc.Col(
-                                _plot_card("Heatmap (Significant Proteins)", "plot-heatmap"),
-                                width=6,
-                            ),
-                        ]
-                    ),
-                    dbc.Row(
-                        [
-                            dbc.Col(_plot_card("PCA Plot", "plot-pca"), width=6),
-                            dbc.Col(
-                                _plot_card("Boxplot (Intensity Distribution)", "plot-boxplot"),
-                                width=6,
-                            ),
-                        ]
-                    ),
-                    dbc.Row(
-                        dbc.Col(_plot_card("Correlation Heatmap", "plot-correlation"), width=12)
-                    ),
-                ],
-                width=9,
+            dbc.Card(
+                dbc.CardBody(
+                    [
+                        html.Div(
+                            [html.Span(icon, style={"marginRight": "8px"}), html.Span(title)],
+                            style={
+                                "fontSize": "13px",
+                                "fontWeight": "700",
+                                "color": "var(--ink)",
+                                "marginBottom": "12px",
+                            },
+                        ),
+                        dbc.Row(controls, className="g-3"),
+                    ]
+                ),
+                className=f"card-accent-{accent} mb-3",
+            ),
+            dbc.Card(
+                dbc.CardBody(
+                    [
+                        dcc.Loading(
+                            dcc.Graph(
+                                id=graph_id,
+                                figure=placeholder,
+                                style={"height": "620px"},
+                                config={"displaylogo": False},
+                            )
+                        ),
+                        html.Div(
+                            [
+                                dbc.Button(
+                                    "⬇ Download TIFF",
+                                    id=f"{graph_id}-download-btn",
+                                    color="success",
+                                    size="sm",
+                                    outline=True,
+                                ),
+                                dcc.Download(id=f"{graph_id}-download"),
+                            ],
+                            style={"textAlign": "right", "marginTop": "8px"},
+                        ),
+                    ],
+                    style={"padding": "8px"},
+                ),
             ),
         ]
     )
+
+
+def layout() -> html.Div:
+    header = dbc.Card(
+        dbc.CardBody(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.H4("Visualization", className="mb-1"),
+                            html.P(
+                                "Explore volcano, heatmap, PCA, boxplot, and correlation views for a "
+                                "completed comparison.",
+                                style={
+                                    "fontSize": "13px",
+                                    "color": "var(--muted)",
+                                    "marginBottom": 0,
+                                },
+                            ),
+                        ],
+                        width="auto",
+                        className="me-auto",
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Label(
+                                "Comparison",
+                                style={
+                                    "fontSize": "10.5px",
+                                    "fontWeight": "700",
+                                    "color": "var(--muted)",
+                                    "textTransform": "uppercase",
+                                    "letterSpacing": "0.04em",
+                                    "marginBottom": "4px",
+                                },
+                            ),
+                            dcc.Dropdown(
+                                id="viz-comp-select", options=[], value=None, clearable=False
+                            ),
+                        ],
+                        width=4,
+                    ),
+                ],
+                align="center",
+                justify="between",
+                className="g-3",
+            )
+        ),
+        className="card-accent-indigo mb-3",
+    )
+
+    volcano_controls = [
+        _control(
+            "P-value cutoff",
+            dbc.Input(
+                id="volcano-pval",
+                type="number",
+                value=0.05,
+                min=0.001,
+                max=0.1,
+                step=0.005,
+                size="sm",
+            ),
+        ),
+        _control(
+            "Fold change cutoff",
+            dbc.Input(id="volcano-fc", type="number", value=0, min=0, max=5, step=0.5, size="sm"),
+        ),
+        _control(
+            "Top genes to label",
+            dbc.Input(id="volcano-top-n", type="number", value=10, min=0, max=50, size="sm"),
+        ),
+        _control(
+            "Label mode",
+            dcc.Dropdown(
+                id="volcano-label-mode",
+                options=[
+                    {"label": "Protein symbol/name", "value": "symbol"},
+                    {"label": "Accession IDs", "value": "accession"},
+                    {"label": "Full protein names", "value": "fullname"},
+                    {"label": "No labels", "value": "none"},
+                ],
+                value="fullname",
+                clearable=False,
+            ),
+            width=3,
+        ),
+    ]
+
+    heatmap_controls = [
+        _control(
+            "Heatmap type",
+            dcc.Dropdown(
+                id="heatmap-mode",
+                options=[
+                    {"label": "All significant proteins", "value": "all"},
+                    {"label": "Top upregulated", "value": "up"},
+                    {"label": "Top downregulated", "value": "down"},
+                    {"label": "Top up + down", "value": "both"},
+                ],
+                value="all",
+                clearable=False,
+            ),
+            width=3,
+        ),
+        _control(
+            "Top proteins",
+            dbc.Input(id="heatmap-top-n", type="number", value=50, min=1, max=10000, size="sm"),
+        ),
+        _control(
+            "Row distance",
+            dcc.Dropdown(
+                id="heatmap-row-distance",
+                options=[
+                    {"label": d.capitalize(), "value": d}
+                    for d in [
+                        "euclidean",
+                        "pearson",
+                        "spearman",
+                        "kendall",
+                        "manhattan",
+                        "canberra",
+                        "maximum",
+                    ]
+                ],
+                value="euclidean",
+                clearable=False,
+            ),
+            width=2,
+        ),
+        _control(
+            "Column distance",
+            dcc.Dropdown(
+                id="heatmap-col-distance",
+                options=[
+                    {"label": d.capitalize(), "value": d}
+                    for d in [
+                        "euclidean",
+                        "pearson",
+                        "spearman",
+                        "kendall",
+                        "manhattan",
+                        "canberra",
+                        "maximum",
+                    ]
+                ],
+                value="euclidean",
+                clearable=False,
+            ),
+            width=2,
+        ),
+        _control(
+            "Options",
+            dbc.Checklist(
+                id="heatmap-toggles",
+                options=[
+                    {"label": "Scale", "value": "scale"},
+                    {"label": "Cluster rows", "value": "cluster_rows"},
+                    {"label": "Cluster columns", "value": "cluster_cols"},
+                    {"label": "Protein names", "value": "show_names"},
+                ],
+                value=["scale", "cluster_rows", "cluster_cols", "show_names"],
+                switch=True,
+                inline=True,
+            ),
+            width=12,
+        ),
+    ]
+
+    pca_controls = [
+        _control(
+            "PC (X-axis)", dbc.Input(id="pca-pc1", type="number", value=1, min=1, max=10, size="sm")
+        ),
+        _control(
+            "PC (Y-axis)", dbc.Input(id="pca-pc2", type="number", value=2, min=1, max=10, size="sm")
+        ),
+        _control(
+            "Options",
+            dbc.Checklist(
+                id="pca-toggles",
+                options=[
+                    {"label": "95% confidence ellipses", "value": "ellipses"},
+                    {"label": "Sample labels", "value": "labels"},
+                ],
+                value=["ellipses", "labels"],
+                switch=True,
+                inline=True,
+            ),
+            width=6,
+        ),
+    ]
+
+    boxplot_controls = [
+        _control(
+            "Plot style",
+            dcc.Dropdown(
+                id="boxplot-style",
+                options=[
+                    {"label": "Violin plot", "value": "violin"},
+                    {"label": "Traditional boxplot", "value": "traditional"},
+                ],
+                value="violin",
+                clearable=False,
+            ),
+            width=3,
+        ),
+    ]
+
+    correlation_controls = [
+        _control(
+            "Method",
+            dcc.Dropdown(
+                id="correlation-method",
+                options=[
+                    {"label": "Pearson", "value": "pearson"},
+                    {"label": "Spearman", "value": "spearman"},
+                    {"label": "Kendall", "value": "kendall"},
+                ],
+                value="pearson",
+                clearable=False,
+            ),
+            width=2,
+        ),
+        _control(
+            "Options",
+            dbc.Checklist(
+                id="correlation-toggles",
+                options=[{"label": "Show correlation coefficients", "value": "show_values"}],
+                value=["show_values"],
+                switch=True,
+                inline=True,
+            ),
+            width=4,
+        ),
+    ]
+
+    tabs = dbc.Tabs(
+        [
+            dbc.Tab(
+                _plot_panel("Volcano Plot", "🌋", volcano_controls, "plot-volcano", "coral"),
+                label="Volcano",
+                tab_id="tab-volcano",
+            ),
+            dbc.Tab(
+                _plot_panel(
+                    "Heatmap (Significant Proteins)",
+                    "🔥",
+                    heatmap_controls,
+                    "plot-heatmap",
+                    "amber",
+                ),
+                label="Heatmap",
+                tab_id="tab-heatmap",
+            ),
+            dbc.Tab(
+                _plot_panel("PCA Plot", "📊", pca_controls, "plot-pca", "indigo"),
+                label="PCA",
+                tab_id="tab-pca",
+            ),
+            dbc.Tab(
+                _plot_panel(
+                    "Boxplot (Intensity Distribution)",
+                    "📦",
+                    boxplot_controls,
+                    "plot-boxplot",
+                    "teal",
+                ),
+                label="Boxplot",
+                tab_id="tab-boxplot",
+            ),
+            dbc.Tab(
+                _plot_panel(
+                    "Correlation Heatmap", "🔗", correlation_controls, "plot-correlation", "indigo"
+                ),
+                label="Correlation",
+                tab_id="tab-correlation",
+            ),
+        ],
+        id="viz-plot-tabs",
+        active_tab="tab-volcano",
+        className="mb-3",
+    )
+
+    return html.Div([header, tabs])
 
 
 @callback(
@@ -417,4 +631,89 @@ def render_correlation(comp_name, method, toggles, dea_results):
         intensity_matrix,
         method=method or "pearson",
         show_values="show_values" in (toggles or []),
+    )
+
+
+@callback(
+    Output("plot-volcano-download", "data"),
+    Input("plot-volcano-download-btn", "n_clicks"),
+    State("plot-volcano", "figure"),
+    State("viz-comp-select", "value"),
+    prevent_initial_call=True,
+)
+def download_volcano_tiff(n_clicks, figure, comp_name):
+    """Port of output$download_volcano (R line 5889)."""
+    if not figure:
+        raise PreventUpdate
+    tiff_bytes = _figure_to_tiff_bytes(figure)
+    return dcc.send_bytes(
+        lambda buf: buf.write(tiff_bytes), f"{comp_name or 'comparison'}_volcano.tiff"
+    )
+
+
+@callback(
+    Output("plot-heatmap-download", "data"),
+    Input("plot-heatmap-download-btn", "n_clicks"),
+    State("plot-heatmap", "figure"),
+    State("viz-comp-select", "value"),
+    prevent_initial_call=True,
+)
+def download_heatmap_tiff(n_clicks, figure, comp_name):
+    """Port of output$download_heatmap (R line 5898)."""
+    if not figure:
+        raise PreventUpdate
+    tiff_bytes = _figure_to_tiff_bytes(figure)
+    return dcc.send_bytes(
+        lambda buf: buf.write(tiff_bytes), f"{comp_name or 'comparison'}_heatmap.tiff"
+    )
+
+
+@callback(
+    Output("plot-pca-download", "data"),
+    Input("plot-pca-download-btn", "n_clicks"),
+    State("plot-pca", "figure"),
+    State("viz-comp-select", "value"),
+    prevent_initial_call=True,
+)
+def download_pca_tiff(n_clicks, figure, comp_name):
+    """Port of output$download_pca (R line 5954)."""
+    if not figure:
+        raise PreventUpdate
+    tiff_bytes = _figure_to_tiff_bytes(figure)
+    return dcc.send_bytes(
+        lambda buf: buf.write(tiff_bytes), f"{comp_name or 'comparison'}_pca.tiff"
+    )
+
+
+@callback(
+    Output("plot-boxplot-download", "data"),
+    Input("plot-boxplot-download-btn", "n_clicks"),
+    State("plot-boxplot", "figure"),
+    State("viz-comp-select", "value"),
+    prevent_initial_call=True,
+)
+def download_boxplot_tiff(n_clicks, figure, comp_name):
+    """Port of output$download_boxplot (R line 5963)."""
+    if not figure:
+        raise PreventUpdate
+    tiff_bytes = _figure_to_tiff_bytes(figure)
+    return dcc.send_bytes(
+        lambda buf: buf.write(tiff_bytes), f"{comp_name or 'comparison'}_boxplot.tiff"
+    )
+
+
+@callback(
+    Output("plot-correlation-download", "data"),
+    Input("plot-correlation-download-btn", "n_clicks"),
+    State("plot-correlation", "figure"),
+    State("viz-comp-select", "value"),
+    prevent_initial_call=True,
+)
+def download_correlation_tiff(n_clicks, figure, comp_name):
+    """Port of output$download_correlation (R line 5972)."""
+    if not figure:
+        raise PreventUpdate
+    tiff_bytes = _figure_to_tiff_bytes(figure)
+    return dcc.send_bytes(
+        lambda buf: buf.write(tiff_bytes), f"{comp_name or 'comparison'}_correlation.tiff"
     )
