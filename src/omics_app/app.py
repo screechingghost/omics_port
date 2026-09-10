@@ -1,9 +1,24 @@
+"""
+Dash app shell -- mirrors the 9-tab navbarPage structure of app_12-02.R
+(ui <- navbarPage(...), line 450), restructured as a sidebar-nav layout.
+"""
+
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, dcc, html
 
 from omics_app.server import cache
-from omics_app.ui import analysis, colors, comparisons, home, upload, visualization
+from omics_app.ui import (
+    analysis,
+    colors,
+    comparisons,
+    download,
+    enrichment,
+    home,
+    session,
+    upload,
+    visualization,
+)
 
 app = dash.Dash(
     __name__,
@@ -68,6 +83,7 @@ app.index_string = """
             p, label, .form-label { color: var(--ink); }
             small, .text-muted, .form-text { color: var(--muted) !important; }
 
+            /* --- App shell: fixed sidebar + scrollable content --- */
             .app-shell { display: flex; height: 100vh; overflow: hidden; }
             .sidebar {
                 width: 248px;
@@ -105,6 +121,7 @@ app.index_string = """
                 max-width: 1200px;
             }
 
+            /* --- Vertical nav (dbc.Tabs vertical=True) --- */
             #main-tabs .nav-link {
                 border: none;
                 border-left: 3px solid transparent;
@@ -128,7 +145,7 @@ app.index_string = """
                 border-left-color: var(--amber);
             }
 
-            
+            /* --- Cards --- */
             .card {
                 border: 1px solid var(--border);
                 border-radius: 10px;
@@ -191,7 +208,7 @@ TABS = [
     ("session", "ℹ️ Session Info"),
 ]
 
-
+# tab_id -> layout function. Add entries here as each tab gets built.
 TAB_LAYOUTS = {
     "home": home.layout,
     "upload": upload.layout,
@@ -199,10 +216,17 @@ TAB_LAYOUTS = {
     "colors": colors.layout,
     "analysis": analysis.layout,
     "visualization": visualization.layout,
+    "enrichment": enrichment.layout,
+    "download": download.layout,
+    "session": session.layout,
 }
 
 app.layout = html.Div(
     [
+        # rv-equivalent: server-side application state.
+        # If main_data/dea_results get large, back this with flask-caching
+        # (server-side session) rather than the default client-side JSON
+        # store -- see README "State management" section.
         dcc.Store(id="store-main-data"),
         dcc.Store(id="store-app-config"),
         dcc.Store(id="store-comparisons"),
@@ -232,6 +256,14 @@ app.layout = html.Div(
                     ],
                     className="sidebar",
                 ),
+                # Every tab's layout is built once, up front, and stays in
+                # the DOM permanently -- switching tabs only toggles which
+                # panel is visible (see set_active_panel below). This is
+                # what fixes state loss on tab switch: dropdown selections,
+                # loaded previews, etc. used to be destroyed and rebuilt
+                # from scratch every time render_tab() replaced tab-content
+                # wholesale, even though the underlying dcc.Store data was
+                # never actually lost.
                 html.Div(
                     [
                         html.Div(
@@ -274,6 +306,8 @@ def set_active_panel(active_tab: str):
     ]
 
 
+# "Go to Data Upload →" button on the Home tab jumps tabs, mirroring
+# observeEvent(input$goto_upload, ...) (R line 1892).
 @dash.callback(
     Output("main-tabs", "active_tab"),
     Input("goto-upload-btn", "n_clicks"),
