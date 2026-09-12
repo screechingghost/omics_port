@@ -1,3 +1,4 @@
+# pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import dash_bootstrap_components as dbc
 from dash import Input, Output, callback, dcc, html
 
@@ -234,7 +235,7 @@ def render_status_message(analysis_type, comparison_method, user_name, user_id):
         return dbc.Alert(
             [
                 html.Strong("Ready to proceed! "),
-                f"Analysis: {analysis_type.upper()} | "
+                f"Analysis: {analysis_type.upper()} | ",
                 f"Method: {_METHOD_LABELS.get(comparison_method, comparison_method)}",
                 html.Br(),
                 f"User: {user_name} | ID: {user_id}",

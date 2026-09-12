@@ -24,6 +24,7 @@ abbreviated to a representative subset here -- the full mapping needs
 that function ported too, which is backend work, not layout.
 """
 
+# pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
@@ -57,11 +58,16 @@ def layout() -> html.Div:
             [
                 html.H4("Enrichment Analysis Setup"),
                 dbc.Label("Comparison:", className="mt-2"),
-                dcc.Dropdown(id="enrichment-comparison-select", options=[], placeholder="Run Analysis first"),
-
+                dcc.Dropdown(
+                    id="enrichment-comparison-select", options=[], placeholder="Run Analysis first"
+                ),
                 dbc.Label("Select Organism:", className="mt-3"),
-                dcc.Dropdown(id="enrichment-organism", options=ORGANISM_OPTIONS, value="human", clearable=False),
-
+                dcc.Dropdown(
+                    id="enrichment-organism",
+                    options=ORGANISM_OPTIONS,
+                    value="human",
+                    clearable=False,
+                ),
                 dbc.Label("Enrichment Engine:", className="mt-3"),
                 dbc.RadioItems(
                     id="enrichment-engine",
@@ -71,7 +77,6 @@ def layout() -> html.Div:
                     ],
                     value="bioc",
                 ),
-
                 # Both engine-specific blocks are always shown -- see module
                 # docstring (no conditionalPanel-style toggle without a callback).
                 html.Div(
@@ -106,39 +111,91 @@ def layout() -> html.Div:
                                 {"label": "UniProt Accession", "value": "UNIPROT_ACCESSION"},
                                 {"label": "RefSeq Protein", "value": "REFSEQ_PROTEIN_ACCESSION"},
                             ],
-                            value="OFFICIAL_GENE_SYMBOL", clearable=False,
+                            value="OFFICIAL_GENE_SYMBOL",
+                            clearable=False,
                         ),
                         dbc.Label("DAVID Categories:", className="mt-2"),
-                        dbc.Input(id="david-categories", type="text",
-                                   value="GOTERM_BP_DIRECT,GOTERM_CC_DIRECT,GOTERM_MF_DIRECT,KEGG_PATHWAY"),
+                        dbc.Input(
+                            id="david-categories",
+                            type="text",
+                            value="GOTERM_BP_DIRECT,GOTERM_CC_DIRECT,GOTERM_MF_DIRECT,KEGG_PATHWAY",
+                        ),
                         dbc.Label("DAVID EASE threshold:", className="mt-2"),
-                        dbc.Input(id="david-ease-threshold", type="number", value=1, min=0.001, max=1, step=0.005),
+                        dbc.Input(
+                            id="david-ease-threshold",
+                            type="number",
+                            value=1,
+                            min=0.001,
+                            max=1,
+                            step=0.005,
+                        ),
                         dbc.Label("DAVID minimum count:", className="mt-2"),
-                        dbc.Input(id="david-count-threshold", type="number", value=1, min=1, max=100, step=1),
+                        dbc.Input(
+                            id="david-count-threshold",
+                            type="number",
+                            value=1,
+                            min=1,
+                            max=100,
+                            step=1,
+                        ),
                         dbc.Checklist(
                             id="david-mock",
-                            options=[{"label": "Use mock DAVID for local testing only", "value": "mock"}],
-                            value=[], switch=True, className="mt-2",
+                            options=[
+                                {"label": "Use mock DAVID for local testing only", "value": "mock"}
+                            ],
+                            value=[],
+                            switch=True,
+                            className="mt-2",
                         ),
                     ]
                 ),
-
                 html.Hr(),
                 dbc.Label("Enrichment p-value cutoff:"),
-                dbc.Input(id="enrichment-pvalue-cutoff", type="number", value=0.05, min=0.001, max=1, step=0.005),
+                dbc.Input(
+                    id="enrichment-pvalue-cutoff",
+                    type="number",
+                    value=0.05,
+                    min=0.001,
+                    max=1,
+                    step=0.005,
+                ),
                 dbc.Label("Enrichment q-value cutoff:", className="mt-2"),
-                dbc.Input(id="enrichment-qvalue-cutoff", type="number", value=1, min=0.001, max=1, step=0.005),
-
-                dbc.Button("🧬 Run Enrichment Analysis", id="run-enrichment-btn",
-                           color="primary", size="lg", className="w-100 mt-3", disabled=True),
-                dbc.Button("▶ Run All Enrichment Analyses", id="run-all-enrichment-btn",
-                           color="info", className="w-100 mt-2", disabled=True),
-
+                dbc.Input(
+                    id="enrichment-qvalue-cutoff",
+                    type="number",
+                    value=1,
+                    min=0.001,
+                    max=1,
+                    step=0.005,
+                ),
+                dbc.Button(
+                    "🧬 Run Enrichment Analysis",
+                    id="run-enrichment-btn",
+                    color="primary",
+                    size="lg",
+                    className="w-100 mt-3",
+                    disabled=True,
+                ),
+                dbc.Button(
+                    "▶ Run All Enrichment Analyses",
+                    id="run-all-enrichment-btn",
+                    color="info",
+                    className="w-100 mt-2",
+                    disabled=True,
+                ),
                 html.Hr(),
                 html.H5("Progress:"),
-                html.Pre("Not run yet.", id="enrichment-progress",
-                          style={"fontSize": "12px", "color": "var(--muted)", "backgroundColor": "var(--bg)",
-                                 "padding": "8px", "borderRadius": "6px"}),
+                html.Pre(
+                    "Not run yet.",
+                    id="enrichment-progress",
+                    style={
+                        "fontSize": "12px",
+                        "color": "var(--muted)",
+                        "backgroundColor": "var(--bg)",
+                        "padding": "8px",
+                        "borderRadius": "6px",
+                    },
+                ),
             ]
         ),
         className="card-accent-teal",
@@ -148,23 +205,36 @@ def layout() -> html.Div:
         dbc.CardBody(
             [
                 html.H4("Enrichment Results"),
-                html.Pre("Run an enrichment analysis to see a summary here.", id="enrichment-summary",
-                          style={"fontSize": "13px", "color": "var(--muted)"}),
+                html.Pre(
+                    "Run an enrichment analysis to see a summary here.",
+                    id="enrichment-summary",
+                    style={"fontSize": "13px", "color": "var(--muted)"},
+                ),
                 html.Hr(),
                 html.H5("Enrichment Table:"),
                 html.Div(
                     "No results yet.",
                     id="enrichment-results-table",
-                    style={"color": "var(--muted)", "fontSize": "13px", "padding": "24px",
-                           "textAlign": "center", "border": "1px dashed var(--border)", "borderRadius": "8px"},
+                    style={
+                        "color": "var(--muted)",
+                        "fontSize": "13px",
+                        "padding": "24px",
+                        "textAlign": "center",
+                        "border": "1px dashed var(--border)",
+                        "borderRadius": "8px",
+                    },
                 ),
                 html.Hr(),
                 dbc.Row(
                     [
                         dbc.Col(html.H5("Enrichment Visualization:"), width=6),
                         dbc.Col(
-                            dcc.Dropdown(id="enrichment-plot-type", options=PLOT_TYPE_OPTIONS,
-                                         value="go_ontology", clearable=False),
+                            dcc.Dropdown(
+                                id="enrichment-plot-type",
+                                options=PLOT_TYPE_OPTIONS,
+                                value="go_ontology",
+                                clearable=False,
+                            ),
                             width=6,
                         ),
                     ]
@@ -172,15 +242,32 @@ def layout() -> html.Div:
                 html.Div(
                     "Plot will appear here after running an enrichment analysis.",
                     id="enrichment-plot-placeholder",
-                    style={"height": "400px", "display": "flex", "alignItems": "center", "justifyContent": "center",
-                           "color": "var(--muted)", "border": "1px dashed var(--border)", "borderRadius": "8px",
-                           "marginTop": "12px"},
+                    style={
+                        "height": "400px",
+                        "display": "flex",
+                        "alignItems": "center",
+                        "justifyContent": "center",
+                        "color": "var(--muted)",
+                        "border": "1px dashed var(--border)",
+                        "borderRadius": "8px",
+                        "marginTop": "12px",
+                    },
                 ),
-                dbc.Button("⬇ Download TIFF", id="download-enrichment-plot-btn",
-                           color="success", size="sm", outline=True, className="mt-2", disabled=True),
+                dbc.Button(
+                    "⬇ Download TIFF",
+                    id="download-enrichment-plot-btn",
+                    color="success",
+                    size="sm",
+                    outline=True,
+                    className="mt-2",
+                    disabled=True,
+                ),
                 html.Hr(),
                 html.H5("All Plot Preview"),
-                html.Div(id="enrichment-all-plots-preview", style={"color": "var(--muted)", "fontSize": "13px"}),
+                html.Div(
+                    id="enrichment-all-plots-preview",
+                    style={"color": "var(--muted)", "fontSize": "13px"},
+                ),
             ]
         ),
         className="card-accent-indigo",

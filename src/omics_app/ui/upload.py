@@ -1,3 +1,4 @@
+# pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import base64
 import io
 import uuid
@@ -522,7 +523,7 @@ def gate_upload_on_user_info(app_config):
     banner = dbc.Alert(
         [
             html.Strong("User Name and User ID required. "),
-            "Please fill them in on the Home tab before loading data -- "
+            "Please fill them in on the Home tab before loading data -- ",
             "they're used to organize exported results into user-specific folders.",
         ],
         color="warning",

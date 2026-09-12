@@ -41,6 +41,7 @@ crammed into one sidebar. This is a deliberate restructuring, not a
 plot logic are unchanged.
 """
 
+# pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import io
 
 import dash_bootstrap_components as dbc
@@ -60,7 +61,7 @@ from omics_app.plotting.volcano import build_volcano_figure
 
 def _empty_figure(message: str) -> go.Figure:
     fig = go.Figure()
-    fig.add_annotation(text=message, showarrow=False, font=dict(size=14))
+    fig.add_annotation(text=message, showarrow=False, font={"size": 14})
     fig.update_layout(xaxis_visible=False, yaxis_visible=False, template="plotly_white")
     return fig
 

@@ -14,10 +14,10 @@ throughout development to validate the pipeline against a known-correct answer.
 | ⚖️ Comparisons | ✅ Built (2-group path only — see Known Gaps) |
 | 🎨 Color Mapping | ✅ Built |
 | 🔬 Analysis | ✅ Built (2-group path only — see Known Gaps) |
-| 📊 Visualization | ❌ Not started |
-| 🧬 Enrichment | ❌ Not started |
-| 💾 Download | ❌ Not started |
-| ℹ️ Session Info | ❌ Not started |
+| 📊 Visualization | ✅ Built (2-group path only, default plot type/style per section, TIFF download wired — see Known Gaps) |
+| 🧬 Enrichment | 🟡 Partially wired (Bioconductor GO/Reactome via Enrichr — see Known Gaps) |
+| 💾 Download | 🎨 UI only, no callbacks (buttons disabled) |
+| ℹ️ Session Info | 🎨 UI only, static placeholders |
 
 ## Known gaps — read before trusting output on real data
 
@@ -39,10 +39,49 @@ throughout development to validate the pipeline against a known-correct answer.
    ANOVA path doesn't have per-group abundance columns auto-derived from group flags the way
    the 2-group path does. `stats/anova_path.py` (pure scipy/statsmodels, no R needed) has the
    underlying stats logic; it just isn't connected to Comparisons/Analysis yet.
-3. **No manual group-entry fallback.** Comparisons and Color Mapping both assume the uploaded
+3. **Visualization tab only wires up the default option in each settings group**, not the full menu of R
+   choices. Specifically: PCA plot type is Biplot only (Scree/Loading/Cumulative Variance/Variable plot,
+   R's other 4 options, aren't ported); Boxplot style is Violin/Traditional only (no Raincloud — needs
+   `ggdist`'s half-eye density geometry, no direct Plotly equivalent — or Jitter); Correlation
+   visualization is Clustered Heatmap only (9 of R's 10 `viz_type` options aren't ported — pairs panels,
+   network graph, dendrogram-only, etc. are each a genuinely different plot, not a styling variant).
+   Heatmap has no k-means row/column split blocks (plain hierarchical reordering only). See each
+   `plotting/*.py` module's docstring for the full simplification list. New dependency:
+   `scikit-learn` (PCA + StandardScaler) — add it to `requirements.txt` if it's not there yet.
+4. **No manual group-entry fallback.** Comparisons and Color Mapping both assume the uploaded
    file has "Found in Sample Group" columns. Data without those columns (R's manual-entry path)
    isn't supported yet.
-4. **"Run All Comparisons" button has no callback.** Only single-comparison "Run Analysis" works.
+5. **"Run All Comparisons" button has no callback.** Only single-comparison "Run Analysis" works.
+   Same gap on the Enrichment tab's "Run All Enrichment Analyses".
+6. **Enrichment tab: Bioconductor engine only, and only 2 of 9 plot types.** R's engine
+   (`clusterProfiler::enrichGO` + `ReactomePA::enrichPathway`) needs Bioconductor
+   organism-annotation packages (`org.Hs.eg.db`, etc.) with no Python equivalent, so
+   `stats/enrichment.py` uses **Enrichr (via `gseapy`)** instead — a web-API-based
+   over-representation test. Concretely:
+   - **Requires outbound network access at analysis time** (calls `maayanlab.cloud`'s Enrichr
+     API) — R's local Bioconductor packages don't need network once installed. No offline
+     fallback exists yet.
+   - **Organism coverage is partial.** Enrichr's modEnrichr federation only has dedicated
+     instances for Human, Mouse, Fly, Yeast, Worm, and Fish. Rat and Arabidopsis (2 of the 8
+     organism choices) silently fall back to the Human gene sets — the UI surfaces a warning in
+     the run summary when this happens, but treat those results as approximate.
+   - **DAVID Webservice engine isn't implemented.** Selecting it and clicking Run just shows a
+     message; none of the `david-*` inputs (email, species, ID type, categories, EASE
+     threshold) are read anywhere.
+   - **Only Grouped Barplot and Dotplot are wired** of R's 9 `plot_type` options — see
+     `plotting/enrichment.py`'s docstring for the other 7 (GO: By Ontology, Bubble Plot, Up vs
+     Down Comparison, cnetplot, emapplot, both Chord plots).
+   - `gseapy`'s actual `enrichr()` call is **untested end-to-end** in this codebase's own
+     development environment (no outbound network there either) — the gene-list-building logic
+     is unit-testable and was checked, but validate a real run against known genes before
+     trusting results.
+   - Download TIFF for the enrichment plot, and the "All Plot Preview" section, stay
+     unwired/disabled, consistent with the rest of this list.
+7. **Download and Session Info tabs are UI-only.** Every button on Download is `disabled=True`
+   and every panel on Session Info shows a static "not available yet" message — no
+   `dcc.Store` reads, no `dcc.Download`, no file generation. Building these out (a ZIP/report
+   export reading `store-dea-results`/`store-enrichment-results`, a real session/package-version
+   log) is unstarted.
 
 ## Validated and safe to trust
 
@@ -72,6 +111,15 @@ folder to the import path, not `src/`.
 
 In VS Code: **Cmd/Ctrl+Shift+P → "Python: Select Interpreter" → `.venv`** (should happen
 automatically via `.vscode/settings.json`, but confirm in the status bar).
+
+**Dependencies added since the original 5-tab port** — make sure these are in
+`requirements.txt`:
+- `scikit-learn` — PCA + StandardScaler, used by `plotting/pca.py` (Visualization tab)
+- `kaleido` — renders Plotly figures to static PNG server-side, used by the Visualization tab's
+  TIFF download buttons (downloads a bundled headless-Chromium on first install — needs network)
+- `Pillow` — converts that PNG to TIFF (Kaleido itself only emits PNG/JPEG/WebP/SVG/PDF)
+- `gseapy` — Enrichr client, used by `stats/enrichment.py` (Enrichment tab's Bioconductor
+  engine) — **calls need outbound network access at analysis time**, see Known Gaps #6
 
 ## 2. Run the app
 
@@ -125,13 +173,31 @@ re-validate, not for normal use.
 4. Run `python scripts/validate_limma_bridge.py` to confirm the bridge works before relying on
    it.
 
+## 5. The enrichment backend: Enrichr via gseapy
+
+`stats/enrichment.py` is the active Enrichment-tab engine for the Bioconductor GO/Reactome
+option — it calls the [Enrichr](https://maayanlab.cloud/Enrichr/) web API through `gseapy`
+rather than R's `clusterProfiler`/`ReactomePA` (those need Bioconductor organism-annotation
+packages with no Python equivalent). Two things follow from that:
+
+- **It needs outbound network access at analysis time**, not just at install time — every
+  "Run Enrichment Analysis" click makes a live API call. If you're deploying somewhere without
+  outbound internet, this tab's Bioconductor engine won't work and there's no offline fallback
+  yet.
+- **No Entrez ID mapping step.** R's `bitr()` call converts gene symbols to Entrez IDs because
+  `enrichGO`/`enrichPathway` need them; Enrichr takes gene symbols directly, so that whole
+  mapping step just doesn't apply here — one less thing that can silently drop genes.
+
+See Known Gaps #6 above for organism-coverage caveats (Rat/Arabidopsis approximated via Human
+gene sets) and which plot types are wired.
+
 ## Project layout
 
 ```
 omics_port/
 ├── .vscode/
 ├── src/omics_app/
-│   ├── app.py              # Dash entry point, sidebar-nav shell, all tabs mounted permanently
+│   ├── app.py              # Dash entry point, sidebar-nav shell, all 9 tabs mounted permanently
 │   ├── server.py           # Flask-Caching instance (large file uploads, not client-side stores)
 │   ├── data/
 │   │   ├── filtering.py    # filter_valids, impute_downshift -- unit tested
@@ -141,10 +207,20 @@ omics_port/
 │   │   ├── pylimma_bridge.py   # pure-Python limma -- validated against real R limma
 │   │   ├── mbqn.py             # real MBQN normalization -- needs more validation, see Known Gaps
 │   │   ├── anova_path.py       # pure scipy/statsmodels ANOVA -- not yet wired to UI
-│   │   └── limma_bridge.py     # rpy2 -> real R limma -- optional reference/re-validation only
+│   │   ├── limma_bridge.py     # rpy2 -> real R limma -- optional reference/re-validation only
+│   │   ├── comparison_data.py  # load_comparison() -- shared by Visualization & Enrichment tabs
+│   │   └── enrichment.py       # Enrichr (gseapy) over-representation engine -- see Known Gaps #6
+│   ├── plotting/
+│   │   ├── volcano.py, heatmap.py, pca.py, boxplot.py, correlation.py
+│   │   │   # pure Plotly figure builders behind the Visualization tab --
+│   │   │   # each is UI-free and default-option-only, see README Known Gaps
+│   │   └── enrichment.py   # barplot + dotplot builders behind the Enrichment tab (2 of 9 types)
 │   ├── ui/
-│   │   ├── home.py, upload.py, comparisons.py, colors.py, analysis.py
-│   ├── enrichment/, plotting/, export/    # empty stubs, not started
+│   │   ├── home.py, upload.py, comparisons.py, colors.py, analysis.py, visualization.py
+│   │   ├── enrichment.py   # wired: comparison select, Run, summary, table, 2 plot types
+│   │   ├── download.py     # UI only -- every button disabled, no callbacks
+│   │   └── session.py      # UI only -- static placeholder panels
+│   ├── export/    # empty stub, not started
 ├── scripts/
 │   ├── generate_sample_dataset.py     # synthetic data with known ground truth
 │   ├── validate_limma_bridge.py       # sanity-checks the rpy2 bridge (optional)

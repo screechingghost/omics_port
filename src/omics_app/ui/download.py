@@ -27,6 +27,7 @@ hierarchy. This restructures the same content, not new content:
     add it back (conditionally rendered) once Save to Folder is wired up.
 """
 
+# pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import dash_bootstrap_components as dbc
 from dash import html
 

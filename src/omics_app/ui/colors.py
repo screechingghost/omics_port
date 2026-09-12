@@ -1,3 +1,4 @@
+# pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import dash_bootstrap_components as dbc
 import dash_daq as daq
 import plotly.graph_objects as go
@@ -239,7 +240,7 @@ def render_color_preview(color_mapping):
         yaxis={"visible": False},
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(t=40, b=80, l=20, r=20),
+        margin={"t": 40, "b": 80, "l": 20, "r": 20},
     )
 
     summary = html.Div(

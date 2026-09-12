@@ -9,6 +9,7 @@ the Python side yet, so each panel just says so instead of showing
 fabricated data.
 """
 
+# pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import dash_bootstrap_components as dbc
 from dash import html
 
@@ -39,8 +40,17 @@ def _info_card(title: str, placeholder: str) -> dbc.Card:
 def layout() -> html.Div:
     return html.Div(
         [
-            _info_card("Session Information", "Not available yet -- this will report Python/package versions once wired up."),
-            _info_card("Analysis Log", "No actions logged yet -- this will show a running log of uploads, comparisons, and analyses run this session."),
-            _info_card("Loaded Packages", "Not available yet -- this will list the installed package versions in use."),
+            _info_card(
+                "Session Information",
+                "Not available yet -- this will report Python/package versions once wired up.",
+            ),
+            _info_card(
+                "Analysis Log",
+                "No actions logged yet -- this will show a running log of uploads, comparisons, and analyses run this session.",
+            ),
+            _info_card(
+                "Loaded Packages",
+                "Not available yet -- this will list the installed package versions in use.",
+            ),
         ]
     )

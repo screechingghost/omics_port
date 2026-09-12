@@ -6,6 +6,8 @@ Dash app shell -- mirrors the 9-tab navbarPage structure of app_12-02.R
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, dcc, html
+from dash_bootstrap_components._components.Tab import Tab
+from dash_bootstrap_components._components.Tabs import Tabs
 
 from omics_app.server import cache
 from omics_app.ui import (
@@ -247,8 +249,8 @@ app.layout = html.Div(
                             ],
                             className="sidebar-brand",
                         ),
-                        dbc.Tabs(
-                            [dbc.Tab(label=label, tab_id=tab_id) for tab_id, label in TABS],
+                        Tabs(
+                            [Tab(label=label, tab_id=tab_id) for tab_id, label in TABS],
                             id="main-tabs",
                             active_tab="home",
                             className="flex-column",
