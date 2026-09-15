@@ -2,10 +2,11 @@
 import dash_bootstrap_components as dbc
 import dash_daq as daq
 import plotly.graph_objects as go
-from dash import ALL, MATCH, Input, Output, State, callback, dcc, html
+from dash import ALL, MATCH, Input, Output, State, callback, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from omics_app.data.columns import extract_group_names_from_columns
+from omics_app.stats.session_log import append_log_entry
 
 DEFAULT_PALETTE = ["#3498db", "#e74c3c", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c"]
 
@@ -186,15 +187,21 @@ def sync_swatch_with_picker(value, current_style):
 @callback(
     Output("store-color-mapping", "data"),
     Output("color-save-status", "children"),
+    Output("store-analysis-log", "data", allow_duplicate=True),
     Input("save-colors-btn", "n_clicks"),
     State({"type": "group-color-input", "group": ALL}, "value"),
     State({"type": "group-color-input", "group": ALL}, "id"),
+    State("store-analysis-log", "data"),
     prevent_initial_call=True,
 )
-def save_colors(n_clicks, colors, color_ids):
+def save_colors(n_clicks, colors, color_ids, existing_log):
     """Port of observeEvent(input$save_colors_btn, ...) (R line 2661)."""
     if not color_ids:
-        return None, dbc.Alert("No groups available for color mapping yet.", color="warning")
+        return (
+            None,
+            dbc.Alert("No groups available for color mapping yet.", color="warning"),
+            no_update,
+        )
 
     # daq.ColorPicker's value is {"hex": "#RRGGBB", "rgb": {...}} -- pull
     # just the hex string, matching R's plain hex-string color_mapping.
@@ -202,7 +209,12 @@ def save_colors(n_clicks, colors, color_ids):
         color_ids[i]["group"]: (colors[i] or {}).get("hex", DEFAULT_PALETTE[0])
         for i in range(len(color_ids))
     }
-    return color_mapping, dbc.Alert("Color mapping saved!", color="success", className="py-2 mb-0")
+    log = append_log_entry(existing_log, f"Color mapping saved: {len(color_mapping)} group(s)")
+    return (
+        color_mapping,
+        dbc.Alert("Color mapping saved!", color="success", className="py-2 mb-0"),
+        log,
+    )
 
 
 @callback(

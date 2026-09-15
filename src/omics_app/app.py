@@ -235,6 +235,11 @@ app.layout = html.Div(
         dcc.Store(id="store-dea-results"),
         dcc.Store(id="store-enrichment-results"),
         dcc.Store(id="store-color-mapping"),
+        # Port of R's rv$analysis_log (line 1846), initialized the same
+        # way -- appended to by upload.py, comparisons.py, analysis.py,
+        # ui/enrichment.py, and colors.py; rendered on the Session Info
+        # tab. See stats/session_log.py for the shared append helper.
+        dcc.Store(id="store-analysis-log", data=["Application started successfully"]),
         html.Div(
             [
                 html.Div(

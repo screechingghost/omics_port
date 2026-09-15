@@ -5,10 +5,11 @@ import uuid
 
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import Input, Output, State, callback, ctx, dash_table, dcc, html
+from dash import Input, Output, State, callback, ctx, dash_table, dcc, html, no_update
 
 from omics_app.data.columns import build_main_data_index
 from omics_app.server import cache
+from omics_app.stats.session_log import append_log_entry
 
 
 def layout() -> html.Div:
@@ -724,16 +725,18 @@ def _info_stat(label: str, value, accent: str) -> dbc.Col:
     Output("data-preview-table", "children"),
     Output("data-info-text", "children"),
     Output("store-comparisons", "data", allow_duplicate=True),
+    Output("store-analysis-log", "data", allow_duplicate=True),
     Input("load-data-btn", "n_clicks"),
     State("store-uploaded-file-content", "data"),
     State("sheet-selector", "value"),
     State("rowname-selector", "value"),
+    State("store-analysis-log", "data"),
     prevent_initial_call=True,
 )
-def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col):
+def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col, existing_log):
 
     if not stored_file or not sheet_name:
-        return None, None, dbc.Alert("No file loaded yet.", color="secondary"), None
+        return None, None, dbc.Alert("No file loaded yet.", color="secondary"), None, no_update
 
     decoded = cache.get(f"upload:{stored_file['token']}")
     if decoded is None:
@@ -742,6 +745,7 @@ def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col):
             None,
             dbc.Alert("Upload session expired -- please re-upload the file.", color="warning"),
             None,
+            no_update,
         )
 
     df = _read_excel_fast(io.BytesIO(decoded), sheet_name=sheet_name)
@@ -811,7 +815,10 @@ def on_load_data_clicked(n_clicks, stored_file, sheet_name, rowname_col):
         "data": display_df.to_dict("records"),
         "column_index": column_index,
     }
-    return store_payload, preview, info_panel, None
+    log = append_log_entry(
+        existing_log, f"Data loaded: {len(df)} rows, {len(display_df.columns)} columns"
+    )
+    return store_payload, preview, info_panel, None, log
 
 
 @callback(

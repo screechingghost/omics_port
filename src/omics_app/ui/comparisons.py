@@ -6,6 +6,7 @@ from dash import ALL, Input, Output, State, callback, dash_table, dcc, html
 from dash.exceptions import PreventUpdate
 
 from omics_app.data.columns import extract_group_names_from_columns
+from omics_app.stats.session_log import append_log_entry
 
 
 def layout() -> html.Div:
@@ -163,32 +164,106 @@ def _comparison_card(i: int, group_cols: list[str], abundance_cols: list[str], m
     )
 
     if method == "anova":
-        body = html.Div(
-            [
-                dbc.Label("Select Groups:"),
-                dcc.Dropdown(
-                    id={"type": "comp-anova-groups", "index": i},
-                    options=[{"label": g, "value": g} for g in group_cols],
-                    value=[],  # explicit reset -- see note above _comparison_card
-                    multi=True,
-                ),
-            ]
-        )
+        if group_cols:
+            body = html.Div(
+                [
+                    dbc.Label("Select Groups:"),
+                    dcc.Dropdown(
+                        id={"type": "comp-anova-groups", "index": i},
+                        options=[{"label": g, "value": g} for g in group_cols],
+                        value=[],  # explicit reset -- see note above _comparison_card
+                        multi=True,
+                    ),
+                ]
+            )
+        else:
+            # Port of R lines 2253-2260: no "Found in Sample Group" columns
+            # detected. R offers a full manual per-group builder here too
+            # (numericInput + dynamic group rows), but since the ANOVA path
+            # isn't wired to a working analysis pipeline in this port yet
+            # regardless (see README Known Gaps), that extra UI would have
+            # nothing to feed into -- just surface R's own informational
+            # message instead of building inputs nothing can use yet.
+            body = html.Div(
+                dbc.Alert(
+                    [
+                        html.I(className="fas fa-info-circle me-1"),
+                        "No 'Found in Sample Group' columns detected. This ANOVA comparison would "
+                        "use all abundance columns; manual per-group assignment isn't available yet "
+                        "in this port, and ANOVA analysis itself isn't wired to a working pipeline "
+                        "regardless -- see README Known Gaps.",
+                    ],
+                    color="info",
+                    className="py-2 mb-0",
+                    style={"fontSize": "13px"},
+                )
+            )
     else:  # "normal" 2-group path (default)
+        if group_cols:
+            group_inputs = html.Div(
+                [
+                    dbc.Label("Group 1 (Test):"),
+                    dcc.Dropdown(
+                        id={"type": "comp-group1", "index": i},
+                        options=[{"label": g, "value": g} for g in group_cols],
+                        value=None,  # explicit reset -- see note above _comparison_card
+                    ),
+                    dbc.Label("Group 2 (Control):", className="mt-2"),
+                    dcc.Dropdown(
+                        id={"type": "comp-group2", "index": i},
+                        options=[{"label": g, "value": g} for g in group_cols],
+                        value=None,
+                    ),
+                ]
+            )
+        else:
+            # Manual fallback -- port of R lines 2271-2287. No "Found in
+            # Sample Group" columns exist, so the group NAME can't be
+            # auto-detected from a column header; the user types plain
+            # names instead. Deliberately separate component "type" from
+            # comp-group1/comp-group2 (not just a differently-populated
+            # version of the same id) so the auto_fill_abundance_g1/g2
+            # callbacks below -- which assume a group value is a column
+            # header to pattern-match against -- never fire for manual
+            # entries; R's own manual path has no such auto-detection
+            # either, abundance columns are always picked explicitly here.
+            #
+            # No pipeline.py/stats changes needed for this: a manually
+            # typed name flows into comparison["group1"/"group2"] exactly
+            # like an auto-detected column header does --
+            # extract_group_names_from_columns() already returns a plain
+            # string unchanged when it doesn't match the "Found in
+            # Sample...Group...:" pattern (data/columns.py).
+            group_inputs = html.Div(
+                [
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-info-circle me-1"),
+                            "No 'Found in Sample Group' columns detected. Create Test and Control "
+                            "group names manually here for color mapping, analysis, and plots.",
+                        ],
+                        color="info",
+                        className="py-2 mb-2",
+                        style={"fontSize": "13px"},
+                    ),
+                    dbc.Label("Group 1 Name (Test):"),
+                    dbc.Input(
+                        id={"type": "comp-group1-manual", "index": i},
+                        type="text",
+                        value="Test",
+                    ),
+                    dbc.Label("Group 2 Name (Control):", className="mt-2"),
+                    dbc.Input(
+                        id={"type": "comp-group2-manual", "index": i},
+                        type="text",
+                        value="Control",
+                    ),
+                ]
+            )
+
         body = html.Div(
             [
-                dbc.Label("Group 1 (Test):"),
-                dcc.Dropdown(
-                    id={"type": "comp-group1", "index": i},
-                    options=[{"label": g, "value": g} for g in group_cols],
-                    value=None,  # explicit reset -- see note above _comparison_card
-                ),
-                dbc.Label("Group 2 (Control):", className="mt-2"),
-                dcc.Dropdown(
-                    id={"type": "comp-group2", "index": i},
-                    options=[{"label": g, "value": g} for g in group_cols],
-                    value=None,
-                ),
+                group_inputs,
                 dbc.Label("Abundance Columns (Group 1 - Test):", className="mt-2"),
                 dcc.Dropdown(
                     id={"type": "comp-abundance-g1", "index": i},
@@ -292,17 +367,21 @@ def auto_fill_abundance_g2(group2_values, main_data):
 @callback(
     Output("store-comparisons", "data", allow_duplicate=True),
     Output("comparison-summary-text", "children"),
+    Output("store-analysis-log", "data", allow_duplicate=True),
     Input("setup-comparisons-btn", "n_clicks"),
     State({"type": "comp-name", "index": ALL}, "value"),
     State({"type": "comp-name", "index": ALL}, "id"),
     State({"type": "comp-group1", "index": ALL}, "value"),
     State({"type": "comp-group2", "index": ALL}, "value"),
+    State({"type": "comp-group1-manual", "index": ALL}, "value"),
+    State({"type": "comp-group2-manual", "index": ALL}, "value"),
     State({"type": "comp-abundance-g1", "index": ALL}, "value"),
     State({"type": "comp-abundance-g2", "index": ALL}, "value"),
     State({"type": "comp-anova-groups", "index": ALL}, "value"),
     State("metadata-cols-checklist", "value"),
     State("store-app-config", "data"),
     State("store-main-data", "data"),
+    State("store-analysis-log", "data"),
     prevent_initial_call=True,
 )
 def setup_comparisons(
@@ -311,19 +390,24 @@ def setup_comparisons(
     name_ids,
     group1s,
     group2s,
+    group1_manuals,
+    group2_manuals,
     abund_g1s,
     abund_g2s,
     anova_groups,
     metadata_cols,
     app_config,
     main_data,
+    existing_log,
 ):
 
     method = (app_config or {}).get("comparison_method") or "normal"
     metadata_cols = metadata_cols or []
     all_columns = list(main_data["data"][0].keys()) if main_data and main_data.get("data") else []
+    group_cols_available = bool(((main_data or {}).get("column_index") or {}).get("group_cols"))
 
     comparisons = []
+    skipped: list[str] = []
     for idx, name in enumerate(names):
         comp_index = name_ids[idx]["index"]
         entry = {"index": comp_index, "name": name, "method": method}
@@ -332,6 +416,40 @@ def setup_comparisons(
             groups = anova_groups[idx] if idx < len(anova_groups) else []
             entry["groups"] = groups
             wanted_cols = metadata_cols + (groups or [])
+        elif not group_cols_available:
+            # Manual 2-group fallback -- port of R lines 2352-2387,
+            # including its exact validation rules (required names,
+            # required abundance selections on both sides, no column
+            # double-assigned to both groups).
+            group1_manual = (
+                (group1_manuals[idx] if idx < len(group1_manuals) else "") or ""
+            ).strip()
+            group2_manual = (
+                (group2_manuals[idx] if idx < len(group2_manuals) else "") or ""
+            ).strip()
+            abundance_g1 = abund_g1s[idx] if idx < len(abund_g1s) else []
+            abundance_g2 = abund_g2s[idx] if idx < len(abund_g2s) else []
+            abundance_g1, abundance_g2 = abundance_g1 or [], abundance_g2 or []
+
+            if not group1_manual or not group2_manual:
+                skipped.append(f"{name}: skipped -- Test and Control group names are required.")
+                continue
+            if not abundance_g1 or not abundance_g2:
+                skipped.append(
+                    f"{name}: skipped -- select abundance columns for both Test and Control."
+                )
+                continue
+            if set(abundance_g1) & set(abundance_g2):
+                skipped.append(
+                    f"{name}: skipped -- some abundance columns are assigned to both Test and Control."
+                )
+                continue
+
+            entry["group1"] = group1_manual
+            entry["group2"] = group2_manual
+            entry["abundance_g1"] = abundance_g1
+            entry["abundance_g2"] = abundance_g2
+            wanted_cols = metadata_cols + abundance_g1 + abundance_g2
         else:
             group1 = group1s[idx] if idx < len(group1s) else None
             group2 = group2s[idx] if idx < len(group2s) else None
@@ -369,7 +487,18 @@ def setup_comparisons(
                 f"  {c['name']}: {c.get('group1')} (n={len(c.get('abundance_g1') or [])}) "
                 f"vs {c.get('group2')} (n={len(c.get('abundance_g2') or [])})"
             )
-    return payload, "\n".join(summary_lines)
+    if skipped:
+        summary_lines.append("")
+        summary_lines.append("Skipped:")
+        summary_lines.extend(f"  {line}" for line in skipped)
+
+    return (
+        payload,
+        "\n".join(summary_lines),
+        append_log_entry(
+            existing_log, f"Comparisons configured: {len(comparisons)} comparison(s) ({method})"
+        ),
+    )
 
 
 # --- Comparison Preview: pick a comparison, see the column-sliced data

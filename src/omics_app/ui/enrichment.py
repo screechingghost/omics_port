@@ -1,48 +1,59 @@
 """
-Port of R tabPanel("🧬 Enrichment", ...) (app_12-02.R, lines 1385-1502).
+Port of R tabPanel("🧬 Enrichment", ...) (app_12-02.R, lines 1385-1502)
+and observeEvent(input$run_enrichment_btn, ...) (~line 9700) --
+Bioconductor engine only. See stats/enrichment.py for the actual
+Enrichr-based over-representation logic (UI-free, testable) and
+plotting/enrichment.py for the 2 wired plot types; this module is the
+thin Dash wrapper around both.
 
-UI-ONLY, as requested -- this module is layout, no callbacks. Nothing
-here reads store-dea-results, calls any enrichment library, or writes
-to a store; every control keeps R's default value but is otherwise
-inert. Wiring it up (comparison selector driven by store-dea-results,
-Run Enrichment Analysis -> a real GO/Reactome or DAVID call, results
-table/plot rendering) is future work, not part of this pass -- follow
-ui/analysis.py's pattern (@callback functions reading/writing
-dcc.Store) when that's ready.
+What's wired:
+  - Comparison selector, driven by store-dea-results (only comparisons
+    with a completed 2-group Analysis run show up).
+  - Run Enrichment Analysis -> stats/enrichment.run_enrichment_analysis
+    -> store-enrichment-results, keyed by comparison name (same
+    accumulate-don't-overwrite pattern ui/analysis.py uses for
+    store-dea-results).
+  - Results summary, results table (dash_table.DataTable), and 2 of
+    the 9 plot types (Grouped Barplot, Dotplot).
+  - Analysis Log entry on every successful run (store-analysis-log).
 
-Known simplification even at the UI level: R's two engine-specific
-settings blocks (Bioconductor GO/Reactome vs. DAVID Webservice, R
-lines 1404-1439) are shown via conditionalPanel, toggled by the
-enrichment_engine radio. Reproducing that here would need a callback
-(even a purely client-side visibility toggle is still a callback), so
-for this UI-only pass both blocks are simply shown at once, each
-clearly labeled. Add a toggle callback for `enrichment-engine` when
-this tab gets wired up.
-
-Organism list (line 272-283 in R, get_organism_options()) is
-abbreviated to a representative subset here -- the full mapping needs
-that function ported too, which is backend work, not layout.
+What's still NOT wired:
+  - DAVID Webservice engine -- selecting it and clicking Run just
+    shows a message; none of the david-* inputs are read anywhere.
+  - "Run All Enrichment Analyses" button -- stays disabled.
+  - 7 of 9 plot types -- selecting one shows a placeholder message.
+  - "Download TIFF" for the enrichment plot -- stays disabled.
+  - "All Plot Preview" section at the bottom -- stays a static
+    placeholder.
 """
 
 # pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import dash_bootstrap_components as dbc
-from dash import dcc, html
+import pandas as pd
+import plotly.graph_objects as go
+from dash import Input, Output, State, callback, dash_table, dcc, html, no_update
+from dash.exceptions import PreventUpdate
+
+from omics_app.plotting.enrichment import build_enrichment_barplot, build_enrichment_dotplot
+from omics_app.stats.comparison_data import load_comparison
+from omics_app.stats.enrichment import EnrichmentError, run_enrichment_analysis
+from omics_app.stats.session_log import append_log_entry
 
 ORGANISM_OPTIONS = [
     {"label": "Human (GO + Reactome)", "value": "human"},
     {"label": "Mouse (GO + Reactome)", "value": "mouse"},
-    {"label": "Rat (GO + Reactome)", "value": "rat"},
+    {"label": "Rat (approximated via Human gene sets)", "value": "rat"},
     {"label": "Zebrafish (GO + Reactome)", "value": "zebrafish"},
     {"label": "Fly (GO only)", "value": "fly"},
     {"label": "Worm (C. elegans) (GO only)", "value": "worm"},
     {"label": "Yeast (GO + Reactome)", "value": "yeast"},
-    {"label": "Arabidopsis (GO only)", "value": "arabidopsis"},
+    {"label": "Arabidopsis (approximated via Human gene sets)", "value": "arabidopsis"},
 ]
 
 PLOT_TYPE_OPTIONS = [
-    {"label": "GO: By Ontology (BP/MF/CC)", "value": "go_ontology"},
     {"label": "Grouped Barplot", "value": "barplot"},
     {"label": "Dotplot", "value": "dotplot"},
+    {"label": "GO: By Ontology (BP/MF/CC)", "value": "go_ontology"},
     {"label": "Bubble Plot", "value": "bubble"},
     {"label": "Up vs Down Comparison", "value": "up_down_compare"},
     {"label": "Gene-Pathway Network (cnetplot)", "value": "cnetplot"},
@@ -50,6 +61,15 @@ PLOT_TYPE_OPTIONS = [
     {"label": "Chord: Pathway Up", "value": "chord_up"},
     {"label": "Chord: Pathway Down", "value": "chord_down"},
 ]
+
+_WIRED_PLOT_TYPES = {"barplot", "dotplot"}
+
+
+def _empty_figure(message: str) -> go.Figure:
+    fig = go.Figure()
+    fig.add_annotation(text=message, showarrow=False, font=dict(size=14))
+    fig.update_layout(xaxis_visible=False, yaxis_visible=False, template="plotly_white")
+    return fig
 
 
 def layout() -> html.Div:
@@ -72,13 +92,11 @@ def layout() -> html.Div:
                 dbc.RadioItems(
                     id="enrichment-engine",
                     options=[
-                        {"label": "Bioconductor GO/Reactome", "value": "bioc"},
-                        {"label": "DAVID Webservice", "value": "david"},
+                        {"label": "Bioconductor GO/Reactome (via Enrichr)", "value": "bioc"},
+                        {"label": "DAVID Webservice (not wired up)", "value": "david"},
                     ],
                     value="bioc",
                 ),
-                # Both engine-specific blocks are always shown -- see module
-                # docstring (no conditionalPanel-style toggle without a callback).
                 html.Div(
                     [
                         html.Hr(),
@@ -97,7 +115,7 @@ def layout() -> html.Div:
                 html.Div(
                     [
                         html.Hr(),
-                        html.H6("DAVID settings", style={"color": "var(--muted)"}),
+                        html.H6("DAVID settings (unused)", style={"color": "var(--muted)"}),
                         dbc.Label("DAVID Email:"),
                         dbc.Input(id="david-email", type="email", placeholder="you@lab.edu"),
                         dbc.Label("DAVID Species:", className="mt-2"),
@@ -194,6 +212,7 @@ def layout() -> html.Div:
                         "backgroundColor": "var(--bg)",
                         "padding": "8px",
                         "borderRadius": "6px",
+                        "whiteSpace": "pre-wrap",
                     },
                 ),
             ]
@@ -208,21 +227,14 @@ def layout() -> html.Div:
                 html.Pre(
                     "Run an enrichment analysis to see a summary here.",
                     id="enrichment-summary",
-                    style={"fontSize": "13px", "color": "var(--muted)"},
+                    style={"fontSize": "13px", "color": "var(--muted)", "whiteSpace": "pre-wrap"},
                 ),
                 html.Hr(),
                 html.H5("Enrichment Table:"),
                 html.Div(
                     "No results yet.",
                     id="enrichment-results-table",
-                    style={
-                        "color": "var(--muted)",
-                        "fontSize": "13px",
-                        "padding": "24px",
-                        "textAlign": "center",
-                        "border": "1px dashed var(--border)",
-                        "borderRadius": "8px",
-                    },
+                    style={"color": "var(--muted)", "fontSize": "13px"},
                 ),
                 html.Hr(),
                 dbc.Row(
@@ -232,26 +244,19 @@ def layout() -> html.Div:
                             dcc.Dropdown(
                                 id="enrichment-plot-type",
                                 options=PLOT_TYPE_OPTIONS,
-                                value="go_ontology",
+                                value="barplot",
                                 clearable=False,
                             ),
                             width=6,
                         ),
                     ]
                 ),
-                html.Div(
-                    "Plot will appear here after running an enrichment analysis.",
-                    id="enrichment-plot-placeholder",
-                    style={
-                        "height": "400px",
-                        "display": "flex",
-                        "alignItems": "center",
-                        "justifyContent": "center",
-                        "color": "var(--muted)",
-                        "border": "1px dashed var(--border)",
-                        "borderRadius": "8px",
-                        "marginTop": "12px",
-                    },
+                dcc.Loading(
+                    dcc.Graph(
+                        id="plot-enrichment",
+                        figure=_empty_figure("Run an enrichment analysis first."),
+                        style={"height": "440px", "marginTop": "12px"},
+                    )
                 ),
                 dbc.Button(
                     "⬇ Download TIFF",
@@ -265,6 +270,7 @@ def layout() -> html.Div:
                 html.Hr(),
                 html.H5("All Plot Preview"),
                 html.Div(
+                    "Not wired up yet.",
                     id="enrichment-all-plots-preview",
                     style={"color": "var(--muted)", "fontSize": "13px"},
                 ),
@@ -274,3 +280,206 @@ def layout() -> html.Div:
     )
 
     return dbc.Row([dbc.Col(settings, width=4), dbc.Col(results, width=8)])
+
+
+@callback(
+    Output("enrichment-comparison-select", "options"),
+    Output("enrichment-comparison-select", "value"),
+    Input("store-dea-results", "data"),
+)
+def populate_enrichment_comparison_selector(dea_results):
+    """Mirrors ui/visualization.py's comparison-selector callback, but
+    also filters out comparisons load_comparison() can't reconstruct
+    (ANOVA / pre-upgrade entries)."""
+    if not dea_results:
+        return [], None
+    valid_names = [name for name in dea_results if load_comparison(dea_results, name) is not None]
+    if not valid_names:
+        return [], None
+    return [{"label": name, "value": name} for name in valid_names], valid_names[0]
+
+
+@callback(
+    Output("run-enrichment-btn", "disabled"),
+    Input("enrichment-comparison-select", "value"),
+)
+def toggle_run_enrichment_button(comp_name):
+    return not comp_name
+
+
+@callback(
+    Output("store-enrichment-results", "data"),
+    Output("enrichment-progress", "children"),
+    Output("store-analysis-log", "data", allow_duplicate=True),
+    Input("run-enrichment-btn", "n_clicks"),
+    State("enrichment-comparison-select", "value"),
+    State("enrichment-engine", "value"),
+    State("enrichment-organism", "value"),
+    State("enrichment-types", "value"),
+    State("enrichment-pvalue-cutoff", "value"),
+    State("enrichment-qvalue-cutoff", "value"),
+    State("store-dea-results", "data"),
+    State("store-enrichment-results", "data"),
+    State("store-analysis-log", "data"),
+    prevent_initial_call=True,
+)
+def run_enrichment(
+    n_clicks,
+    comp_name,
+    engine,
+    organism,
+    types,
+    pval_cutoff,
+    qval_cutoff,
+    dea_results,
+    existing_enrichment_results,
+    existing_log,
+):
+    """Port of observeEvent(input$run_enrichment_btn, ...) (R ~line 9700),
+    Bioconductor engine only."""
+    if engine != "bioc":
+        return (
+            no_update,
+            "DAVID Webservice engine isn't wired up yet -- switch to Bioconductor GO/Reactome to run enrichment.",
+            no_update,
+        )
+
+    loaded = load_comparison(dea_results, comp_name)
+    if loaded is None:
+        return (
+            no_update,
+            "Select a completed 2-group comparison first (run Analysis, then come back here).",
+            no_update,
+        )
+
+    types = types or []
+    gene_set_keys = []
+    if "GO" in types:
+        gene_set_keys += ["GO_Biological_Process", "GO_Cellular_Component", "GO_Molecular_Function"]
+    if "Reactome" in types:
+        gene_set_keys.append("Reactome_Pathways")
+    if not gene_set_keys:
+        return (
+            no_update,
+            "Select at least one of GO or Reactome under Bioconductor settings.",
+            no_update,
+        )
+
+    try:
+        result = run_enrichment_analysis(
+            loaded["df"],
+            loaded["sig_mask"],
+            organism or "human",
+            gene_set_keys,
+            pvalue_cutoff=pval_cutoff or 0.05,
+            qvalue_cutoff=qval_cutoff or 1.0,
+        )
+    except EnrichmentError as exc:
+        return no_update, f"Enrichment failed: {exc}", no_update
+
+    lines = [
+        f"Comparison: {comp_name}",
+        f"Up-regulated genes tested: {len(result['up_genes'])}",
+        f"Down-regulated genes tested: {len(result['down_genes'])}",
+        f"Enriched terms passing cutoffs: {len(result['results_df'])}",
+    ]
+    if result["warning"]:
+        lines.append(f"Note: {result['warning']}")
+
+    payload = dict(existing_enrichment_results or {})
+    payload[comp_name] = {
+        "results": result["results_df"].to_dict("records"),
+        "up_genes": result["up_genes"],
+        "down_genes": result["down_genes"],
+        "warning": result["warning"],
+    }
+    log = append_log_entry(
+        existing_log,
+        f"Enrichment run: '{comp_name}' -- {len(result['results_df'])} term(s) passing cutoffs",
+    )
+    return payload, "\n".join(lines), log
+
+
+@callback(
+    Output("enrichment-summary", "children"),
+    Input("store-enrichment-results", "data"),
+    Input("enrichment-comparison-select", "value"),
+)
+def render_enrichment_summary(enrichment_results, comp_name):
+    if not enrichment_results or not comp_name or comp_name not in enrichment_results:
+        raise PreventUpdate
+    entry = enrichment_results[comp_name]
+    lines = [
+        f"Comparison: {comp_name}",
+        f"Up-regulated genes tested: {len(entry.get('up_genes', []))}",
+        f"Down-regulated genes tested: {len(entry.get('down_genes', []))}",
+        f"Enriched terms: {len(entry.get('results', []))}",
+    ]
+    if entry.get("warning"):
+        lines.append(f"Note: {entry['warning']}")
+    return "\n".join(lines)
+
+
+@callback(
+    Output("enrichment-results-table", "children"),
+    Input("store-enrichment-results", "data"),
+    Input("enrichment-comparison-select", "value"),
+)
+def render_enrichment_table(enrichment_results, comp_name):
+    if not enrichment_results or not comp_name or comp_name not in enrichment_results:
+        raise PreventUpdate
+    records = enrichment_results[comp_name].get("results", [])
+    if not records:
+        return "No enriched terms passed the cutoffs."
+
+    df = pd.DataFrame(records)
+    display_cols = [
+        c
+        for c in ["Direction", "Source", "Term", "Overlap", "PValue", "AdjPValue", "Genes"]
+        if c in df.columns
+    ]
+    df = df[display_cols].head(200).copy()
+    for col in ("PValue", "AdjPValue"):
+        if col in df.columns:
+            df[col] = df[col].map(lambda v: f"{v:.2e}")
+    if "Genes" in df.columns:
+        df["Genes"] = df["Genes"].astype(str).str.slice(0, 80)
+
+    return dash_table.DataTable(
+        columns=[{"name": c, "id": c} for c in display_cols],
+        data=df.to_dict("records"),
+        page_size=15,
+        sort_action="native",
+        filter_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={
+            "fontSize": "12px",
+            "fontFamily": "Inter, sans-serif",
+            "textAlign": "left",
+            "padding": "6px",
+        },
+        style_header={"fontWeight": "600", "backgroundColor": "var(--bg)"},
+    )
+
+
+@callback(
+    Output("plot-enrichment", "figure"),
+    Input("store-enrichment-results", "data"),
+    Input("enrichment-comparison-select", "value"),
+    Input("enrichment-plot-type", "value"),
+)
+def render_enrichment_plot(enrichment_results, comp_name, plot_type):
+    if not enrichment_results or not comp_name or comp_name not in enrichment_results:
+        raise PreventUpdate
+    records = enrichment_results[comp_name].get("results", [])
+    df = pd.DataFrame(records)
+    if df.empty:
+        return _empty_figure("No enriched terms passed the cutoffs.")
+
+    if plot_type not in _WIRED_PLOT_TYPES:
+        label = next((o["label"] for o in PLOT_TYPE_OPTIONS if o["value"] == plot_type), plot_type)
+        return _empty_figure(f"'{label}' isn't wired up yet -- try Grouped Barplot or Dotplot.")
+
+    if plot_type == "dotplot":
+        return build_enrichment_dotplot(df)
+    return build_enrichment_barplot(df)

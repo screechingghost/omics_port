@@ -1,10 +1,11 @@
 # pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import Input, Output, State, callback, dash_table, dcc, html
+from dash import Input, Output, State, callback, dash_table, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from omics_app.stats.pipeline import AnalysisError, run_two_group_analysis
+from omics_app.stats.session_log import append_log_entry
 
 
 def layout() -> html.Div:
@@ -281,6 +282,7 @@ def _build_results_table(result: dict):
     Output("analysis-progress", "children"),
     Output("analysis-results-summary", "children"),
     Output("significant-results-table", "children"),
+    Output("store-analysis-log", "data", allow_duplicate=True),
     Input("run-analysis-btn", "n_clicks"),
     State("analysis-comp-select", "value"),
     State("store-comparisons", "data"),
@@ -292,6 +294,7 @@ def _build_results_table(result: dict):
     State("fc-threshold", "value"),
     State("fc-operator", "value"),
     State("store-dea-results", "data"),
+    State("store-analysis-log", "data"),
     prevent_initial_call=True,
 )
 def run_analysis(
@@ -306,6 +309,7 @@ def run_analysis(
     fc_threshold,
     fc_operator,
     existing_dea_results,
+    existing_log,
 ):
 
     # User-info gate, matching R lines 4342-4349
@@ -316,7 +320,7 @@ def run_analysis(
             "Please enter User Name and User ID on the Home tab before running analysis.",
             color="danger",
         )
-        return existing_dea_results, alert, None, None
+        return existing_dea_results, alert, None, None, no_update
 
     if not comp_name or not main_data:
         raise PreventUpdate
@@ -332,7 +336,7 @@ def run_analysis(
             "('normal') comparisons can be run here so far.",
             color="warning",
         )
-        return existing_dea_results, alert, None, None
+        return existing_dea_results, alert, None, None, no_update
 
     df = pd.DataFrame(main_data["data"])
     rowname_col = main_data.get("rowname_col")
@@ -351,7 +355,7 @@ def run_analysis(
         )
     except AnalysisError as e:
         alert = dbc.Alert(str(e), color="danger")
-        return existing_dea_results, alert, None, None
+        return existing_dea_results, alert, None, None, no_update
 
     dea_results = dict(existing_dea_results or {})
     dea_results[comp_name] = {
@@ -382,4 +386,8 @@ def run_analysis(
     }
     summary = _build_summary(result, comp_name, params)
     table = _build_results_table(result)
-    return dea_results, progress, summary, table
+    log = append_log_entry(
+        existing_log,
+        f"Analysis run: '{comp_name}' -- {result['n_kept']} kept, {result['n_significant']} significant",
+    )
+    return dea_results, progress, summary, table, log
