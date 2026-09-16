@@ -13,18 +13,22 @@ What's wired:
     -> store-enrichment-results, keyed by comparison name (same
     accumulate-don't-overwrite pattern ui/analysis.py uses for
     store-dea-results).
-  - Results summary, results table (dash_table.DataTable), and 2 of
-    the 9 plot types (Grouped Barplot, Dotplot).
+  - Results summary, results table (dash_table.DataTable), and all 9
+    plot types from plotting/enrichment.py (2 direct ports, 3 adapted to
+    this port's flat Enrichr results shape, 4 built as approximations
+    where R depends on packages/layouts with no wired Python equivalent
+    -- see plotting/enrichment.py's module docstring for exactly which
+    is which).
+  - Download TIFF for the currently-shown enrichment plot.
+  - "All Plot Preview" -- a 2-column grid rendering all 9 plot types at
+    once for the selected comparison (a convenience addition; R has no
+    literal equivalent of this specific grid).
   - Analysis Log entry on every successful run (store-analysis-log).
 
 What's still NOT wired:
   - DAVID Webservice engine -- selecting it and clicking Run just
     shows a message; none of the david-* inputs are read anywhere.
   - "Run All Enrichment Analyses" button -- stays disabled.
-  - 7 of 9 plot types -- selecting one shows a placeholder message.
-  - "Download TIFF" for the enrichment plot -- stays disabled.
-  - "All Plot Preview" section at the bottom -- stays a static
-    placeholder.
 """
 
 # pyright: reportCallIssue=false, reportInvalidTypeForm=false
@@ -34,10 +38,20 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dash_table, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
-from omics_app.plotting.enrichment import build_enrichment_barplot, build_enrichment_dotplot
+from omics_app.plotting.enrichment import (
+    build_enrichment_barplot,
+    build_enrichment_bubble_plot,
+    build_enrichment_chord_plot,
+    build_enrichment_cnetplot,
+    build_enrichment_dotplot,
+    build_enrichment_map_plot,
+    build_go_ontology_plot,
+    build_up_down_comparison_plot,
+)
 from omics_app.stats.comparison_data import load_comparison
 from omics_app.stats.enrichment import EnrichmentError, run_enrichment_analysis
 from omics_app.stats.session_log import append_log_entry
+from omics_app.ui.visualization import _figure_to_tiff_bytes
 
 ORGANISM_OPTIONS = [
     {"label": "Human (GO + Reactome)", "value": "human"},
@@ -62,7 +76,17 @@ PLOT_TYPE_OPTIONS = [
     {"label": "Chord: Pathway Down", "value": "chord_down"},
 ]
 
-_WIRED_PLOT_TYPES = {"barplot", "dotplot"}
+_WIRED_PLOT_TYPES = {
+    "barplot",
+    "dotplot",
+    "go_ontology",
+    "bubble",
+    "up_down_compare",
+    "cnetplot",
+    "emapplot",
+    "chord_up",
+    "chord_down",
+}
 
 
 def _empty_figure(message: str) -> go.Figure:
@@ -267,12 +291,15 @@ def layout() -> html.Div:
                     className="mt-2",
                     disabled=True,
                 ),
+                dcc.Download(id="download-enrichment-plot"),
                 html.Hr(),
                 html.H5("All Plot Preview"),
-                html.Div(
-                    "Not wired up yet.",
-                    id="enrichment-all-plots-preview",
-                    style={"color": "var(--muted)", "fontSize": "13px"},
+                dcc.Loading(
+                    html.Div(
+                        "Run an enrichment analysis to see all plot types here.",
+                        id="enrichment-all-plots-preview",
+                        style={"color": "var(--muted)", "fontSize": "13px"},
+                    )
                 ),
             ]
         ),
@@ -480,6 +507,104 @@ def render_enrichment_plot(enrichment_results, comp_name, plot_type):
         label = next((o["label"] for o in PLOT_TYPE_OPTIONS if o["value"] == plot_type), plot_type)
         return _empty_figure(f"'{label}' isn't wired up yet -- try Grouped Barplot or Dotplot.")
 
+    return _build_plot_by_type(df, plot_type)
+
+
+def _build_plot_by_type(df: pd.DataFrame, plot_type: str) -> go.Figure:
+    """Dispatch table matching R's generate_enrichment_plot_by_type
+    switch (R lines 10589-10598) -- all 9 plot_type options, see
+    plotting/enrichment.py for what each one actually does (2 direct
+    ports, 3 adapted to this port's flat results shape, 4 approximations
+    where R relies on packages/layouts with no Python equivalent here)."""
     if plot_type == "dotplot":
         return build_enrichment_dotplot(df)
+    if plot_type == "go_ontology":
+        return build_go_ontology_plot(df)
+    if plot_type == "bubble":
+        return build_enrichment_bubble_plot(df)
+    if plot_type == "up_down_compare":
+        return build_up_down_comparison_plot(df)
+    if plot_type == "cnetplot":
+        return build_enrichment_cnetplot(df)
+    if plot_type == "emapplot":
+        return build_enrichment_map_plot(df)
+    if plot_type == "chord_up":
+        return build_enrichment_chord_plot(df, "up")
+    if plot_type == "chord_down":
+        return build_enrichment_chord_plot(df, "down")
     return build_enrichment_barplot(df)
+
+
+@callback(
+    Output("download-enrichment-plot-btn", "disabled"),
+    Input("store-enrichment-results", "data"),
+    Input("enrichment-comparison-select", "value"),
+)
+def toggle_download_enrichment_button(enrichment_results, comp_name):
+    return not (enrichment_results and comp_name and comp_name in enrichment_results)
+
+
+@callback(
+    Output("download-enrichment-plot", "data"),
+    Input("download-enrichment-plot-btn", "n_clicks"),
+    State("plot-enrichment", "figure"),
+    State("enrichment-comparison-select", "value"),
+    State("enrichment-plot-type", "value"),
+    prevent_initial_call=True,
+)
+def download_enrichment_tiff(n_clicks, figure, comp_name, plot_type):
+    """Port of R's TIFF export for the enrichment plot, same pattern as
+    ui/visualization.py's download_volcano_tiff etc."""
+    if not figure:
+        raise PreventUpdate
+    tiff_bytes = _figure_to_tiff_bytes(figure)
+    return dcc.send_bytes(
+        lambda buf: buf.write(tiff_bytes),
+        f"{comp_name or 'comparison'}_enrichment_{plot_type or 'plot'}.tiff",
+    )
+
+
+@callback(
+    Output("enrichment-all-plots-preview", "children"),
+    Input("store-enrichment-results", "data"),
+    Input("enrichment-comparison-select", "value"),
+)
+def render_all_plots_preview(enrichment_results, comp_name):
+    """Small-multiples grid of every wired plot type for the current
+    comparison -- lets you compare all 9 views at once instead of
+    switching the dropdown one at a time. R doesn't have a literal
+    equivalent of this grid; it's a convenience addition on top of the
+    ported single-plot dropdown above."""
+    if not enrichment_results or not comp_name or comp_name not in enrichment_results:
+        return "Run an enrichment analysis to see all plot types here."
+    records = enrichment_results[comp_name].get("results", [])
+    df = pd.DataFrame(records)
+    if df.empty:
+        return "No enriched terms passed the cutoffs."
+
+    cards = []
+    for opt in PLOT_TYPE_OPTIONS:
+        plot_type = opt["value"]
+        fig = _build_plot_by_type(df, plot_type)
+        fig.update_layout(height=280, margin={"l": 40, "r": 20, "t": 40, "b": 40})
+        cards.append(
+            dbc.Col(
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            html.Div(
+                                opt["label"], className="fw-bold mb-1", style={"fontSize": "12px"}
+                            ),
+                            dcc.Graph(
+                                figure=fig,
+                                config={"displayModeBar": False},
+                                style={"height": "280px"},
+                            ),
+                        ]
+                    ),
+                    className="mb-3",
+                ),
+                width=6,
+            )
+        )
+    return dbc.Row(cards)

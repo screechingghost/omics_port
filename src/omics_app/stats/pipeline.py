@@ -85,7 +85,7 @@ def run_two_group_analysis(
     # 1. log2 transform (R lines 4404-4410): non-positive values -> NaN first.
     raw = df[all_abundance].copy()
     raw = raw.mask(raw <= 0)
-    log2_data = np.log2(raw)
+    log2_data = pd.DataFrame(np.log2(raw), index=raw.index, columns=raw.columns)
 
     # 2. Filter (R lines 4412-4436)
     min_ratio = min_valid_percent / 100
@@ -250,6 +250,7 @@ def run_multi_group_analysis(
     min_valid_percent: float,
     pvalue_threshold: float,
     significance_method: str,  # "fdr" or "raw"
+    expected_replicate_counts: dict[str, int] | None = None,
 ) -> dict:
     """
     Port of run_anova_comparison (R lines 4012-4160) -- N-group one-way
@@ -274,6 +275,16 @@ def run_multi_group_analysis(
     applies (matches the report generator's "Not applicable for global
     ANOVA" text for this case).
 
+    expected_replicate_counts: optional {group_name: count}, ported from
+    R's "Replicate Counts" textInput + "Auto-Detect Replicates" button
+    (R lines 2892-2901, 3222-3261; validated at R lines 4035-4041). Purely
+    a safety check -- if given, raises AnalysisError when what's
+    auto-matched right now doesn't match what the user expects, instead
+    of silently running on however many columns happened to match (catches
+    a typo'd group name, or a sample that dropped out of the export
+    leaving fewer/extra columns than intended). Omit it to keep the old
+    behavior: whatever auto-matches is used with no check.
+
     Returns a dict: results_df, n_kept, n_significant(_pvalue/_qvalue),
     group_names, sig_column_used, group_col_names (renamed normalized-
     abundance columns per group, the ANOVA analogue of test_col_names/
@@ -296,6 +307,20 @@ def run_multi_group_analysis(
             f"No abundance columns auto-detected for group(s): {', '.join(empty_groups)}."
         )
 
+    if expected_replicate_counts:
+        mismatches = [
+            f"{g}: expected {expected_replicate_counts[g]}, found {len(abundance_by_group[g])}"
+            for g in group_names
+            if g in expected_replicate_counts
+            and expected_replicate_counts[g] != len(abundance_by_group[g])
+        ]
+        if mismatches:
+            raise AnalysisError(
+                "Mismatch between replicate counts and detected columns -- "
+                + "; ".join(mismatches)
+                + ". Check your group names, or click Auto-Detect Replicates again."
+            )
+
     all_abundance = [c for cols in abundance_by_group.values() for c in cols]
     replicate_counts = {g: len(cols) for g, cols in abundance_by_group.items()}
 
@@ -310,9 +335,7 @@ def run_multi_group_analysis(
 
     # 2. Filter
     min_ratio = min_valid_percent / 100
-    min_count = {
-        g: max(1, int(np.floor(n * min_ratio))) for g, n in replicate_counts.items()
-    }
+    min_count = {g: max(1, int(np.floor(n * min_ratio))) for g, n in replicate_counts.items()}
     keep_mask = filter_valids(log2_data, abundance_by_group, min_count, at_least_one=False)
     log2_filtered = log2_data.loc[keep_mask]
     n_kept = len(log2_filtered)

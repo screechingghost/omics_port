@@ -135,3 +135,23 @@ def test_group_name_substring_of_another_does_not_cross_contaminate():
     )
     for col in ordered_cols:
         assert col in result["results_df"].columns
+
+
+def test_expected_replicate_counts_pass_when_matching():
+    df, groups = _synthetic_dataset()
+    result = run_multi_group_analysis(
+        df, _comparison(groups), min_valid_percent=70, pvalue_threshold=0.05,
+        significance_method="raw",
+        expected_replicate_counts={g: 4 for g in groups},
+    )
+    assert result["n_kept"] > 0
+
+
+def test_expected_replicate_counts_raise_on_mismatch():
+    df, groups = _synthetic_dataset()
+    with pytest.raises(AnalysisError, match="Mismatch between replicate counts"):
+        run_multi_group_analysis(
+            df, _comparison(groups), min_valid_percent=70, pvalue_threshold=0.05,
+            significance_method="raw",
+            expected_replicate_counts={"GroupA": 5, "GroupB": 4, "GroupC": 4},
+        )

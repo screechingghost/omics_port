@@ -4,8 +4,10 @@ import pandas as pd
 from dash import Input, Output, State, callback, dash_table, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
+from omics_app.data.columns import build_main_data_index, extract_group_names_from_columns
 from omics_app.stats.pipeline import (
     AnalysisError,
+    _match_abundance_by_group,
     run_multi_group_analysis,
     run_two_group_analysis,
 )
@@ -21,6 +23,54 @@ def layout() -> html.Div:
                         [
                             html.H4("Select Comparison for Analysis"),
                             dcc.Dropdown(id="analysis-comp-select", options=[], value=None),
+                            html.Div(
+                                [
+                                    html.Hr(),
+                                    html.H6(
+                                        "🔬 ANOVA Replicate Counts",
+                                        style={"color": "var(--muted)"},
+                                    ),
+                                    html.Div(
+                                        id="anova-replicate-counts-groups-label",
+                                        className="text-muted",
+                                        style={"fontSize": "12px", "marginBottom": "4px"},
+                                    ),
+                                    dbc.Label("Replicate Counts (comma-separated):"),
+                                    dbc.Input(
+                                        id="anova-replicate-counts",
+                                        type="text",
+                                        placeholder="Auto-detected or enter manually",
+                                        value="",
+                                    ),
+                                    html.Small(
+                                        "Optional: expected sample count per group, in the same "
+                                        "order as the groups above. If given, Run Analysis stops "
+                                        "with a mismatch warning instead of silently using "
+                                        "whatever it auto-detects.",
+                                        className="text-muted",
+                                    ),
+                                    dbc.Button(
+                                        "🪄 Auto-Detect Replicates",
+                                        id="anova-auto-detect-replicates-btn",
+                                        color="info",
+                                        size="sm",
+                                        outline=True,
+                                        className="mt-2",
+                                    ),
+                                    html.Div(
+                                        id="anova-replicate-counts-feedback",
+                                        className="mt-2",
+                                    ),
+                                ],
+                                id="anova-replicate-counts-section",
+                                # Kept mounted (not conditionally built) and
+                                # toggled via style so State reads of its
+                                # children below always resolve -- same
+                                # display-toggle approach as R's
+                                # conditionalPanel, which also keeps the
+                                # inputs alive rather than destroying them.
+                                style={"display": "none"},
+                            ),
                             html.Hr(),
                             html.H5("📊 Filtering Parameters"),
                             html.Div(
@@ -148,6 +198,88 @@ def populate_analysis_comparison_selector(comparisons_data):
         return [], None
     options = [{"label": c["name"], "value": c["name"]} for c in comparisons]
     return options, comparisons[0]["name"]
+
+
+def _find_comparison(comparisons_data, comp_name):
+    comparisons = (comparisons_data or {}).get("comparisons") or []
+    return next((c for c in comparisons if c["name"] == comp_name), None)
+
+
+@callback(
+    Output("anova-replicate-counts-section", "style", allow_duplicate=True),
+    Output("anova-replicate-counts-groups-label", "children", allow_duplicate=True),
+    Output("anova-replicate-counts", "value", allow_duplicate=True),
+    Output("anova-replicate-counts-feedback", "children", allow_duplicate=True),
+    Input("analysis-comp-select", "value"),
+    State("store-comparisons", "data"),
+    prevent_initial_call=True,
+)
+def toggle_anova_replicate_counts_section(comp_name, comparisons_data):
+    """Port of R's conditionalPanel(condition = "input.anova_grouping_mode
+    == 'auto'") wrapping the Replicate Counts textInput (R lines 2883-2902)
+    -- shown only for ANOVA comparisons. Our port always uses the groups
+    picked on the Comparisons tab (R's "manual" mode), so there's no
+    grouping-mode toggle to port, just the visibility gate."""
+    comparison = _find_comparison(comparisons_data, comp_name)
+    if not comparison or (comparison.get("method") or "normal") != "anova":
+        return {"display": "none"}, "", "", ""
+
+    group_names = extract_group_names_from_columns(comparison.get("groups") or [])
+    label = (
+        f"Groups (in order): {', '.join(group_names)}"
+        if group_names
+        else "No groups selected for this comparison yet -- set them up on the Comparisons tab."
+    )
+    # Reset the field each time the selected comparison changes, same as
+    # R's textInput starting empty (value = "") rather than carrying a
+    # stale count over from a previously-viewed comparison.
+    return {"display": "block"}, label, "", ""
+
+
+@callback(
+    Output("anova-replicate-counts", "value", allow_duplicate=True),
+    Output("anova-replicate-counts-feedback", "children", allow_duplicate=True),
+    Input("anova-auto-detect-replicates-btn", "n_clicks"),
+    State("analysis-comp-select", "value"),
+    State("store-comparisons", "data"),
+    State("store-main-data", "data"),
+    prevent_initial_call=True,
+)
+def auto_detect_replicates(n_clicks, comp_name, comparisons_data, main_data):
+    """Port of observeEvent(input$auto_detect_replicates_btn, ...)
+    (R lines 3222-3261). Uses stats/pipeline.py's
+    _match_abundance_by_group (longest-group-name-first) rather than R's
+    own plain per-group grep(), so this doesn't reproduce R's substring-
+    overlap bug (e.g. "IRRADIATED" swallowing "NON_IRRADIATED"'s columns)
+    while auto-detecting."""
+    comparison = _find_comparison(comparisons_data, comp_name)
+    if not comparison or not main_data:
+        raise PreventUpdate
+
+    group_names = extract_group_names_from_columns(comparison.get("groups") or [])
+    if len(group_names) < 1:
+        return no_update, dbc.Alert(
+            "Please select group names first!", color="warning", className="py-1 mb-0"
+        )
+
+    df = pd.DataFrame(main_data["data"])
+    abundance_cols_all = build_main_data_index(df)["abundance_cols"]
+    abundance_by_group = _match_abundance_by_group(group_names, abundance_cols_all)
+    detected_counts = [len(abundance_by_group[g]) for g in group_names]
+    detected_string = ", ".join(str(c) for c in detected_counts)
+
+    zero_groups = [g for g, c in zip(group_names, detected_counts) if c == 0]
+    if zero_groups:
+        feedback = dbc.Alert(
+            f"Warning: No columns found for group(s): {', '.join(zero_groups)}",
+            color="warning",
+            className="py-1 mb-0",
+        )
+    else:
+        feedback = dbc.Alert(
+            f"Auto-detected: {detected_string}", color="success", className="py-1 mb-0"
+        )
+    return detected_string, feedback
 
 
 def _build_top5_table(result: dict):
@@ -318,6 +450,7 @@ def _build_results_table(result: dict):
     State("significance-method", "value"),
     State("fc-threshold", "value"),
     State("fc-operator", "value"),
+    State("anova-replicate-counts", "value"),
     State("store-dea-results", "data"),
     State("store-analysis-log", "data"),
     prevent_initial_call=True,
@@ -333,6 +466,7 @@ def run_analysis(
     significance_method,
     fc_threshold,
     fc_operator,
+    anova_replicate_counts_str,
     existing_dea_results,
     existing_log,
 ):
@@ -375,12 +509,45 @@ def run_analysis(
 
     try:
         if method == "anova":
+            expected_replicate_counts = None
+            replicate_counts_str = (anova_replicate_counts_str or "").strip()
+            if replicate_counts_str:
+                # Port of the validation at R lines 4899-4905 (parse) --
+                # the count-vs-detected mismatch check itself lives in
+                # run_multi_group_analysis (R lines 4035-4041), since it
+                # needs the freshly-auto-matched columns to compare against.
+                group_names_expected = extract_group_names_from_columns(
+                    comparison.get("groups") or []
+                )
+                try:
+                    counts = [int(x.strip()) for x in replicate_counts_str.split(",")]
+                except ValueError:
+                    alert = dbc.Alert(
+                        "Invalid replicate counts! Use comma-separated integers, e.g. 3, 3, 4.",
+                        color="danger",
+                    )
+                    return existing_dea_results, alert, None, None, no_update
+                if len(counts) != len(group_names_expected):
+                    alert = dbc.Alert(
+                        f"You have {len(group_names_expected)} group name(s) but "
+                        f"{len(counts)} replicate count(s).",
+                        color="danger",
+                    )
+                    return existing_dea_results, alert, None, None, no_update
+                if any(c < 1 for c in counts):
+                    alert = dbc.Alert(
+                        "Invalid replicate counts! Each must be at least 1.", color="danger"
+                    )
+                    return existing_dea_results, alert, None, None, no_update
+                expected_replicate_counts = dict(zip(group_names_expected, counts))
+
             result = run_multi_group_analysis(
                 df,
                 comparison,
                 min_valid_percent=params["min_valid_percent"],
                 pvalue_threshold=params["pvalue_threshold"],
                 significance_method=params["significance_method"],
+                expected_replicate_counts=expected_replicate_counts,
             )
         else:
             result = run_two_group_analysis(

@@ -38,7 +38,13 @@ throughout development to validate the pipeline against a known-correct answer.
    `stats/pipeline.py::run_multi_group_analysis` (log2 → filter → impute → normalize →
    per-row one-way ANOVA via `stats/anova_path.py`) now runs end-to-end from the Analysis tab
    for `method == "anova"` comparisons, auto-matching abundance columns to each selected group
-   the same way the 2-group path does. No fold-change concept applies (a 3+-group F-test has
+   the same way the 2-group path does (`stats/pipeline.py::_match_abundance_by_group`, which
+   fixes a substring-overlap bug present in R's own per-group `grep()` -- see its docstring for
+   the "IRRADIATED" vs "NON_IRRADIATED" example). The Analysis tab also has R's "Replicate
+   Counts" textInput + "Auto-Detect Replicates" button (R lines 2892-2901, 3222-3261) ported as
+   an optional safety check: if you fill in expected per-group counts, Run Analysis raises a
+   clear per-group mismatch error instead of silently running on whatever happened to
+   auto-match. No fold-change concept applies (a 3+-group F-test has
    no single up/down direction), so only p-value/q-value thresholds are used.
    **Visualization and Enrichment are NOT extended yet** — both gate on the 2-group-only
    `test_col_names`/`control_col_names` keys (`stats/comparison_data.py`,
