@@ -179,19 +179,20 @@ def _comparison_card(i: int, group_cols: list[str], abundance_cols: list[str], m
         else:
             # Port of R lines 2253-2260: no "Found in Sample Group" columns
             # detected. R offers a full manual per-group builder here too
-            # (numericInput + dynamic group rows), but since the ANOVA path
-            # isn't wired to a working analysis pipeline in this port yet
-            # regardless (see README Known Gaps), that extra UI would have
-            # nothing to feed into -- just surface R's own informational
-            # message instead of building inputs nothing can use yet.
+            # (numericInput + dynamic group rows); that manual builder
+            # still isn't wired in this port -- stats/pipeline.py's
+            # run_multi_group_analysis (see README) always auto-matches
+            # abundance columns from selected group names, so without
+            # group columns to select from, there's nothing to feed it.
             body = html.Div(
                 dbc.Alert(
                     [
                         html.I(className="fas fa-info-circle me-1"),
-                        "No 'Found in Sample Group' columns detected. This ANOVA comparison would "
-                        "use all abundance columns; manual per-group assignment isn't available yet "
-                        "in this port, and ANOVA analysis itself isn't wired to a working pipeline "
-                        "regardless -- see README Known Gaps.",
+                        (
+                            "No 'Found in Sample Group' columns detected. Manual per-group "
+                            "abundance assignment for ANOVA isn't available yet in this port -- "
+                            "see README Known Gaps."
+                        ),
                     ],
                     color="info",
                     className="py-2 mb-0",
@@ -239,7 +240,7 @@ def _comparison_card(i: int, group_cols: list[str], abundance_cols: list[str], m
                     dbc.Alert(
                         [
                             html.I(className="fas fa-info-circle me-1"),
-                            "No 'Found in Sample Group' columns detected. Create Test and Control "
+                            "No 'Found in Sample Group' columns detected. Create Test and Control ",
                             "group names manually here for color mapping, analysis, and plots.",
                         ],
                         color="info",

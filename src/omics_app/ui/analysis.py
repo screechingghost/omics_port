@@ -4,7 +4,11 @@ import pandas as pd
 from dash import Input, Output, State, callback, dash_table, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
-from omics_app.stats.pipeline import AnalysisError, run_two_group_analysis
+from omics_app.stats.pipeline import (
+    AnalysisError,
+    run_multi_group_analysis,
+    run_two_group_analysis,
+)
 from omics_app.stats.session_log import append_log_entry
 
 
@@ -153,7 +157,9 @@ def _build_top5_table(result: dict):
     if pvalue_sig_df.empty:
         return None
 
-    available_cols = [c for c in ["logFC", "P.Value", "adj.P.Val"] if c in pvalue_sig_df.columns]
+    available_cols = [
+        c for c in ["logFC", "F_statistic", "P.Value", "adj.P.Val"] if c in pvalue_sig_df.columns
+    ]
     if not available_cols:
         return html.P("Column information not available", style={"color": "var(--muted)"})
 
@@ -174,23 +180,48 @@ def _build_top5_table(result: dict):
 
 def _build_summary(result: dict, comp_name: str, params: dict) -> html.Div:
 
-    fc_op_labels = {"gte": "≥", "gt": ">", "lte": "≤", "lt": "<", "abs": "|FC| ≥"}
-    fc_line = "Fold Change Filter: None (all fold changes included)"
-    if params["fc_operator"] != "none" and params["fc_threshold"] > 0:
-        op_label = fc_op_labels.get(params["fc_operator"], params["fc_operator"])
-        fc_line = f"Fold Change Filter: log2FC {op_label} {params['fc_threshold']:.2f}"
-
+    is_anova = "group_names" in result
     sig_method_label = (
         "FDR-adjusted (q-value)" if params["significance_method"] == "fdr" else "Raw p-value"
     )
 
-    stat_blocks = [
-        ("Proteins Analyzed", result["n_kept"], "indigo"),
-        ("Significant (p-value)", result["n_significant_pvalue"], "teal"),
-        ("Significant (q-value)", result["n_significant_qvalue"], "coral"),
-        ("Upregulated", result["n_upregulated"], "amber"),
-        ("Downregulated", result["n_downregulated"], "muted"),
-    ]
+    if is_anova:
+        # No fold-change concept for a 3+-group F-test -- there's no
+        # single "up/down" direction (see stats/pipeline.py's
+        # run_multi_group_analysis docstring).
+        stat_blocks = [
+            ("Proteins Analyzed", result["n_kept"], "indigo"),
+            ("Significant (p-value)", result["n_significant_pvalue"], "teal"),
+            ("Significant (q-value)", result["n_significant_qvalue"], "coral"),
+        ]
+        groups_line = html.P(
+            [html.Strong("Groups: "), " vs ".join(result["group_names"])], className="mb-1"
+        )
+        extra_lines = []
+    else:
+        fc_op_labels = {"gte": "≥", "gt": ">", "lte": "≤", "lt": "<", "abs": "|FC| ≥"}
+        fc_line = "Fold Change Filter: None (all fold changes included)"
+        if params["fc_operator"] != "none" and params["fc_threshold"] > 0:
+            op_label = fc_op_labels.get(params["fc_operator"], params["fc_operator"])
+            fc_line = f"Fold Change Filter: log2FC {op_label} {params['fc_threshold']:.2f}"
+
+        stat_blocks = [
+            ("Proteins Analyzed", result["n_kept"], "indigo"),
+            ("Significant (p-value)", result["n_significant_pvalue"], "teal"),
+            ("Significant (q-value)", result["n_significant_qvalue"], "coral"),
+            ("Upregulated", result["n_upregulated"], "amber"),
+            ("Downregulated", result["n_downregulated"], "muted"),
+        ]
+        groups_line = html.P(
+            [
+                html.Strong("Groups: "),
+                result["test_group_name"],
+                " vs ",
+                result["control_group_name"],
+            ],
+            className="mb-1",
+        )
+        extra_lines = [html.P(fc_line, className="mb-1")]
 
     top5_table = _build_top5_table(result)
     top5_section = (
@@ -230,21 +261,13 @@ def _build_summary(result: dict, comp_name: str, params: dict) -> html.Div:
             ),
             html.Hr(),
             html.P([html.Strong("Comparison: "), comp_name], className="mb-1"),
-            html.P(
-                [
-                    html.Strong("Groups: "),
-                    result["test_group_name"],
-                    " vs ",
-                    result["control_group_name"],
-                ],
-                className="mb-1",
-            ),
+            groups_line,
             html.Hr(),
             html.P("Analysis Parameters", className="mb-1 fw-bold"),
             html.P(f"Min Valid Values: {params['min_valid_percent']}%", className="mb-1"),
             html.P(f"P-value Threshold: {params['pvalue_threshold']:.3f}", className="mb-1"),
             html.P(f"Significance Method: {sig_method_label}", className="mb-1"),
-            html.P(fc_line, className="mb-1"),
+            *extra_lines,
             *top5_section,
         ]
     )
@@ -257,7 +280,9 @@ def _build_results_table(result: dict):
         return dbc.Alert("No proteins reached the significance threshold.", color="warning")
 
     display_cols = [
-        c for c in ["logFC", "P.Value", "adj.P.Val", "Comparison"] if c in sig_df.columns
+        c
+        for c in ["logFC", "F_statistic", "P.Value", "adj.P.Val", "Groups", "Comparison"]
+        if c in sig_df.columns
     ]
     preview = sig_df[display_cols].reset_index().head(100)
     return dash_table.DataTable(
@@ -330,12 +355,9 @@ def run_analysis(
     if comparison is None:
         raise PreventUpdate
 
-    if comparison.get("method") != "normal":
-        alert = dbc.Alert(
-            "ANOVA analysis isn't wired up yet in this port -- only 2-group "
-            "('normal') comparisons can be run here so far.",
-            color="warning",
-        )
+    method = comparison.get("method") or "normal"
+    if method not in ("normal", "anova"):
+        alert = dbc.Alert(f"Unknown comparison method: {method!r}.", color="danger")
         return existing_dea_results, alert, None, None, no_update
 
     df = pd.DataFrame(main_data["data"])
@@ -343,40 +365,6 @@ def run_analysis(
     if rowname_col and rowname_col in df.columns:
         df = df.set_index(rowname_col)
 
-    try:
-        result = run_two_group_analysis(
-            df,
-            comparison,
-            min_valid_percent=min_valid_percent or 70,
-            pvalue_threshold=pvalue_threshold or 0.05,
-            significance_method=significance_method or "raw",
-            fc_threshold=fc_threshold or 0,
-            fc_operator=fc_operator or "none",
-        )
-    except AnalysisError as e:
-        alert = dbc.Alert(str(e), color="danger")
-        return existing_dea_results, alert, None, None, no_update
-
-    dea_results = dict(existing_dea_results or {})
-    dea_results[comp_name] = {
-        "results": result["results_df"].reset_index().to_dict("records"),
-        "n_kept": result["n_kept"],
-        "n_significant": result["n_significant"],
-        "test_group_name": result["test_group_name"],
-        "control_group_name": result["control_group_name"],
-        "sig_column": result["sig_column"],
-        # For ui/visualization.py: which normalized-abundance columns
-        # belong to which group, and the index column name needed to
-        # restore `results` back into a properly-indexed DataFrame
-        # (reset_index() above names that column after rowname_col).
-        "test_col_names": result["test_col_names"],
-        "control_col_names": result["control_col_names"],
-        "rowname_col": rowname_col,
-    }
-
-    progress = dbc.Alert(
-        f"Analysis complete for '{comp_name}'.", color="success", className="py-2 mb-0"
-    )
     params = {
         "min_valid_percent": min_valid_percent or 70,
         "pvalue_threshold": pvalue_threshold or 0.05,
@@ -384,6 +372,71 @@ def run_analysis(
         "fc_threshold": fc_threshold or 0,
         "fc_operator": fc_operator or "none",
     }
+
+    try:
+        if method == "anova":
+            result = run_multi_group_analysis(
+                df,
+                comparison,
+                min_valid_percent=params["min_valid_percent"],
+                pvalue_threshold=params["pvalue_threshold"],
+                significance_method=params["significance_method"],
+            )
+        else:
+            result = run_two_group_analysis(
+                df,
+                comparison,
+                min_valid_percent=params["min_valid_percent"],
+                pvalue_threshold=params["pvalue_threshold"],
+                significance_method=params["significance_method"],
+                fc_threshold=params["fc_threshold"],
+                fc_operator=params["fc_operator"],
+            )
+    except AnalysisError as e:
+        alert = dbc.Alert(str(e), color="danger")
+        return existing_dea_results, alert, None, None, no_update
+
+    dea_results = dict(existing_dea_results or {})
+    if method == "anova":
+        dea_results[comp_name] = {
+            "results": result["results_df"].reset_index().to_dict("records"),
+            "n_kept": result["n_kept"],
+            "n_significant": result["n_significant"],
+            "group_names": result["group_names"],
+            "sig_column": result["sig_column"],
+            # ANOVA analogue of test_col_names/control_col_names: one
+            # renamed-column list per group. NOTE: ui/visualization.py
+            # and stats/comparison_data.py both gate on the presence of
+            # "test_col_names"/"control_col_names" to decide whether a
+            # comparison is one they know how to plot/enrich -- ANOVA
+            # entries deliberately don't have those keys yet, so those
+            # tabs correctly show "not supported" for this comparison
+            # until they're extended for the N-group case too.
+            "group_col_names": result["group_col_names"],
+            "method": "anova",
+            "rowname_col": rowname_col,
+        }
+    else:
+        dea_results[comp_name] = {
+            "results": result["results_df"].reset_index().to_dict("records"),
+            "n_kept": result["n_kept"],
+            "n_significant": result["n_significant"],
+            "test_group_name": result["test_group_name"],
+            "control_group_name": result["control_group_name"],
+            "sig_column": result["sig_column"],
+            # For ui/visualization.py: which normalized-abundance columns
+            # belong to which group, and the index column name needed to
+            # restore `results` back into a properly-indexed DataFrame
+            # (reset_index() above names that column after rowname_col).
+            "test_col_names": result["test_col_names"],
+            "control_col_names": result["control_col_names"],
+            "method": "normal",
+            "rowname_col": rowname_col,
+        }
+
+    progress = dbc.Alert(
+        f"Analysis complete for '{comp_name}'.", color="success", className="py-2 mb-0"
+    )
     summary = _build_summary(result, comp_name, params)
     table = _build_results_table(result)
     log = append_log_entry(

@@ -11,9 +11,9 @@ throughout development to validate the pipeline against a known-correct answer.
 |---|---|
 | 🏠 Home | ✅ Built |
 | 📁 Data Upload | ✅ Built |
-| ⚖️ Comparisons | ✅ Built (2-group path only — see Known Gaps) |
+| ⚖️ Comparisons | ✅ Built (2-group + ANOVA multi-group) |
 | 🎨 Color Mapping | ✅ Built |
-| 🔬 Analysis | ✅ Built (2-group path only — see Known Gaps) |
+| 🔬 Analysis | ✅ Built (2-group + ANOVA multi-group — see Known Gaps) |
 | 📊 Visualization | ✅ Built (2-group path only, default plot type/style per section, TIFF download wired — see Known Gaps) |
 | 🧬 Enrichment | 🟡 Partially wired (Bioconductor GO/Reactome via Enrichr — see Known Gaps) |
 | 💾 Download | 🎨 UI only, no callbacks (buttons disabled) |
@@ -34,11 +34,17 @@ throughout development to validate the pipeline against a known-correct answer.
    R app's output before trusting Analysis tab numbers.** If it doesn't hold up, reverting to
    simple median-centering (see git history for `_median_center_normalize` in `pipeline.py`) is
    a safer interim default.
-2. **ANOVA (multi-group) comparisons aren't wired to a working pipeline.** Comparisons tab
-   collects ANOVA group selections, but Analysis tab shows "not yet supported" for them — the
-   ANOVA path doesn't have per-group abundance columns auto-derived from group flags the way
-   the 2-group path does. `stats/anova_path.py` (pure scipy/statsmodels, no R needed) has the
-   underlying stats logic; it just isn't connected to Comparisons/Analysis yet.
+2. **ANOVA (multi-group) comparisons are wired for Comparisons + Analysis only.**
+   `stats/pipeline.py::run_multi_group_analysis` (log2 → filter → impute → normalize →
+   per-row one-way ANOVA via `stats/anova_path.py`) now runs end-to-end from the Analysis tab
+   for `method == "anova"` comparisons, auto-matching abundance columns to each selected group
+   the same way the 2-group path does. No fold-change concept applies (a 3+-group F-test has
+   no single up/down direction), so only p-value/q-value thresholds are used.
+   **Visualization and Enrichment are NOT extended yet** — both gate on the 2-group-only
+   `test_col_names`/`control_col_names` keys (`stats/comparison_data.py`,
+   `ui/visualization.py::_load_comparison`), so an ANOVA comparison's results are stored in
+   `store-dea-results` (with `group_col_names`/`group_names` instead) but won't show up as
+   selectable in those two tabs until they're taught the N-group shape too.
 3. **Visualization tab only wires up the default option in each settings group**, not the full menu of R
    choices. Specifically: PCA plot type is Biplot only (Scree/Loading/Cumulative Variance/Variable plot,
    R's other 4 options, aren't ported); Boxplot style is Violin/Traditional only (no Raincloud — needs
@@ -203,10 +209,10 @@ omics_port/
 │   │   ├── filtering.py    # filter_valids, impute_downshift -- unit tested
 │   │   └── columns.py      # build_main_data_index, extract_group_names_from_columns
 │   ├── stats/
-│   │   ├── pipeline.py         # orchestrates the full 2-group DEA pipeline (active path)
+│   │   ├── pipeline.py         # orchestrates the 2-group DEA + ANOVA multi-group pipelines
 │   │   ├── pylimma_bridge.py   # pure-Python limma -- validated against real R limma
 │   │   ├── mbqn.py             # real MBQN normalization -- needs more validation, see Known Gaps
-│   │   ├── anova_path.py       # pure scipy/statsmodels ANOVA -- not yet wired to UI
+│   │   ├── anova_path.py       # pure scipy/statsmodels ANOVA, used by pipeline.py's multi-group path
 │   │   ├── limma_bridge.py     # rpy2 -> real R limma -- optional reference/re-validation only
 │   │   ├── comparison_data.py  # load_comparison() -- shared by Visualization & Enrichment tabs
 │   │   └── enrichment.py       # Enrichr (gseapy) over-representation engine -- see Known Gaps #6

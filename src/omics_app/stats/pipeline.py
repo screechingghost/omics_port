@@ -17,11 +17,14 @@ algorithm is the next thing to check, not something to assume this
 placeholder covers.
 """
 
+import re
+
 import numpy as np
 import pandas as pd
 
-from omics_app.data.columns import extract_group_names_from_columns
+from omics_app.data.columns import build_main_data_index, extract_group_names_from_columns
 from omics_app.data.filtering import filter_valids, impute_downshift
+from omics_app.stats.anova_path import run_anova_per_row
 from omics_app.stats.mbqn import mbqn_median
 from omics_app.stats.pylimma_bridge import run_pylimma_two_group
 
@@ -197,4 +200,179 @@ def run_two_group_analysis(
         # metadata/raw-abundance columns by name pattern alone).
         "test_col_names": test_col_names,
         "control_col_names": control_col_names,
+    }
+
+
+def _match_abundance_by_group(
+    group_names: list[str], abundance_cols: list[str]
+) -> dict[str, list[str]]:
+    """
+    Matches abundance columns to each group name via case-insensitive
+    substring search, same approach R uses everywhere it auto-detects
+    abundance columns from a group name (e.g. R lines 3181, 3422, 4025,
+    4937 -- all plain `grep(group_name, abundance_cols, ...)`).
+
+    That plain substring approach is ambiguous whenever one group name is
+    a substring of another -- e.g. "IRRADIATED" vs "NON_IRRADIATED", or
+    "CONTROL" vs "CONTROL_TREATED". A naive per-group match (each group
+    searched independently against the full column list) lets the
+    shorter name's pattern also match the longer name's columns, so the
+    same raw column ends up claimed by two groups; when those columns are
+    later renamed per-group, the second group's rename silently clobbers
+    the first group's mapping for that column, corrupting column counts
+    with no error until a downstream KeyError -- exactly what this
+    function exists to prevent.
+
+    Fix: process group names longest-first and remove already-claimed
+    columns from the pool before matching shorter names, so a more
+    specific name always wins over one that's merely a substring of it.
+    This makes matching deterministic regardless of group order in the
+    UI, at the cost of no longer exactly replicating R's per-group
+    behavior in ambiguous cases -- R has the same underlying ambiguity,
+    just resolved arbitrarily by dict/list evaluation order instead of
+    by name specificity.
+    """
+    remaining = list(abundance_cols)
+    matched_by_group: dict[str, list[str]] = {}
+    for name in sorted(group_names, key=len, reverse=True):
+        pattern = re.escape(name)
+        matched = [c for c in remaining if re.search(pattern, c, re.IGNORECASE)]
+        matched_by_group[name] = matched
+        claimed = set(matched)
+        remaining = [c for c in remaining if c not in claimed]
+    # Return in the caller's original group order, not longest-first.
+    return {name: matched_by_group[name] for name in group_names}
+
+
+def run_multi_group_analysis(
+    df: pd.DataFrame,
+    comparison: dict,
+    min_valid_percent: float,
+    pvalue_threshold: float,
+    significance_method: str,  # "fdr" or "raw"
+) -> dict:
+    """
+    Port of run_anova_comparison (R lines 4012-4160) -- N-group one-way
+    ANOVA per row (log2 -> filter -> impute -> normalize -> aov(), same
+    shape as run_two_group_analysis above, using run_anova_per_row for
+    step 5 instead of limma).
+
+    comparison: one entry from store-comparisons' "comparisons" list,
+        method == "anova". Must have "groups": the raw "Found in Sample
+        Group: X" column headers selected on the Comparisons tab.
+
+    Unlike R (which accepts a manually-specified abundance_cols_by_group
+    from a per-group column picker -- R lines 4023-4033), no such picker
+    is wired in ui/comparisons.py yet, so this always auto-matches
+    abundance columns to each group name -- see _match_abundance_by_group
+    for how that matching handles one group name being a substring of
+    another (e.g. "IRRADIATED" vs "NON_IRRADIATED"), which R's own
+    per-group grep() does not handle safely.
+
+    No fold-change concept for ANOVA -- an F-test across 3+ groups has no
+    single "up/down" direction, so only the p-value/q-value threshold
+    applies (matches the report generator's "Not applicable for global
+    ANOVA" text for this case).
+
+    Returns a dict: results_df, n_kept, n_significant(_pvalue/_qvalue),
+    group_names, sig_column_used, group_col_names (renamed normalized-
+    abundance columns per group, the ANOVA analogue of test_col_names/
+    control_col_names -- see run_two_group_analysis for why renaming is
+    needed at all).
+    """
+    group_cols = comparison.get("groups") or []
+    if len(group_cols) < 2:
+        raise AnalysisError("ANOVA requires at least 2 groups.")
+
+    group_names = extract_group_names_from_columns(group_cols)
+    if len(group_names) < 2:
+        raise AnalysisError("ANOVA requires at least 2 distinct groups.")
+
+    abundance_cols_all = build_main_data_index(df)["abundance_cols"]
+    abundance_by_group = _match_abundance_by_group(group_names, abundance_cols_all)
+    empty_groups = [g for g, cols in abundance_by_group.items() if not cols]
+    if empty_groups:
+        raise AnalysisError(
+            f"No abundance columns auto-detected for group(s): {', '.join(empty_groups)}."
+        )
+
+    all_abundance = [c for cols in abundance_by_group.values() for c in cols]
+    replicate_counts = {g: len(cols) for g, cols in abundance_by_group.items()}
+
+    missing = [c for c in all_abundance if c not in df.columns]
+    if missing:
+        raise AnalysisError(f"Columns not found in dataset: {missing}")
+
+    # 1. log2 transform
+    raw = df[all_abundance].copy()
+    raw = raw.mask(raw <= 0)
+    log2_data = np.log2(raw)
+
+    # 2. Filter
+    min_ratio = min_valid_percent / 100
+    min_count = {
+        g: max(1, int(np.floor(n * min_ratio))) for g, n in replicate_counts.items()
+    }
+    keep_mask = filter_valids(log2_data, abundance_by_group, min_count, at_least_one=False)
+    log2_filtered = log2_data.loc[keep_mask]
+    n_kept = len(log2_filtered)
+    if n_kept == 0:
+        raise AnalysisError("No proteins passed filtering!")
+
+    # 3. Imputation -- same fixed seed rationale as run_two_group_analysis.
+    imputed = impute_downshift(log2_filtered, abundance_by_group, random_state=1)
+
+    # 4. Normalization -- see module docstring re: mbqn() gap
+    normalized = mbqn_median(imputed)
+
+    # Rename to distinct, group-labeled column names before merging --
+    # same duplicate-column-name hazard as the 2-group path.
+    group_col_names: dict[str, list[str]] = {}
+    rename_map: dict[str, str] = {}
+    for g, cols in abundance_by_group.items():
+        renamed = [f"{g}_{i + 1}" for i in range(len(cols))]
+        group_col_names[g] = renamed
+        rename_map.update(dict(zip(cols, renamed)))
+    normalized = normalized.rename(columns=rename_map)
+
+    # 5. ANOVA (R lines 4084-4096: aov(protein_data ~ group_factor) per row)
+    ordered_cols = [c for g in group_names for c in group_col_names[g]]
+    group_labels = [g for g in group_names for _ in range(replicate_counts[g])]
+    anova_results = run_anova_per_row(normalized[ordered_cols], group_labels)
+
+    # 6. Merge with metadata
+    metadata_cols = [c for c in df.columns if c not in all_abundance]
+    merged = pd.concat(
+        [
+            df.loc[anova_results.index, metadata_cols],
+            anova_results[["F_statistic", "P.Value", "adj.P.Val"]],
+            normalized.loc[anova_results.index],
+            df.loc[anova_results.index, all_abundance],
+        ],
+        axis=1,
+    )
+
+    # 7. Significance -- no fold-change filter option for ANOVA (R line
+    # 4117-4119 doesn't apply one either).
+    merged["Significance_pvalue"] = merged["P.Value"] < pvalue_threshold
+    merged["Significance_qvalue"] = merged["adj.P.Val"] < pvalue_threshold
+    merged["Groups"] = "_vs_".join(group_names)
+    merged["Comparison"] = f"ANOVA: {' vs '.join(group_names)}"
+
+    sig_column = "Significance_qvalue" if significance_method == "fdr" else "Significance_pvalue"
+    n_significant = int(merged[sig_column].sum())
+    n_significant_pvalue = int(merged["Significance_pvalue"].sum())
+    n_significant_qvalue = int(merged["Significance_qvalue"].sum())
+
+    return {
+        "results_df": merged,
+        "n_kept": n_kept,
+        "n_significant": n_significant,
+        "n_significant_pvalue": n_significant_pvalue,
+        "n_significant_qvalue": n_significant_qvalue,
+        "group_names": group_names,
+        "sig_column": sig_column,
+        # ANOVA analogue of test_col_names/control_col_names -- one
+        # renamed-column list per group instead of exactly two.
+        "group_col_names": group_col_names,
     }
