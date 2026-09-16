@@ -840,7 +840,7 @@ def on_load_sig_results_clicked(n_clicks, contents, filename, existing_dea_resul
     try:
         decoded = _decode_upload(contents)
         sig_data = pd.read_csv(io.BytesIO(decoded), sep="\t")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return existing_dea_results, dbc.Alert(
             f"Error loading significant results: {e}", color="danger"
         )

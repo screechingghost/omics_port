@@ -91,7 +91,7 @@ _WIRED_PLOT_TYPES = {
 
 def _empty_figure(message: str) -> go.Figure:
     fig = go.Figure()
-    fig.add_annotation(text=message, showarrow=False, font=dict(size=14))
+    fig.add_annotation(text=message, showarrow=False, font={"size": 14})
     fig.update_layout(xaxis_visible=False, yaxis_visible=False, template="plotly_white")
     return fig
 
