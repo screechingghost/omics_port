@@ -240,7 +240,7 @@ def _comparison_card(i: int, group_cols: list[str], abundance_cols: list[str], m
                     dbc.Alert(
                         [
                             html.I(className="fas fa-info-circle me-1"),
-                            "No 'Found in Sample Group' columns detected. Create Test and Control "
+                            "No 'Found in Sample Group' columns detected. Create Test and Control ",
                             "group names manually here for color mapping, analysis, and plots.",
                         ],
                         color="info",
