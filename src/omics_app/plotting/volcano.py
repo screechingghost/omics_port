@@ -98,7 +98,7 @@ def build_volcano_figure(
         fig.add_annotation(
             text="Volcano plot for ANOVA comparisons isn't supported yet.",
             showarrow=False,
-            font=dict(size=14),
+            font={"size": 14},
         )
         fig.update_layout(xaxis_visible=False, yaxis_visible=False)
         return fig
@@ -130,7 +130,7 @@ def build_volcano_figure(
                 y=-np.log10(subset["pvalue"]),
                 mode="markers",
                 name=expr,
-                marker=dict(color=color, size=6, opacity=0.8),
+                marker={"color": color, "size": 6, "opacity": 0.8},
                 text=subset["ProteinNames"],
                 hovertemplate="%{text}<br>log2FC=%{x:.2f}<br>-log10(p)=%{y:.2f}<extra></extra>",
             )
@@ -154,7 +154,7 @@ def build_volcano_figure(
                 arrowhead=0,
                 ax=0,
                 ay=-15,
-                font=dict(size=9),
+                font={"size": 9},
                 bgcolor="rgba(255,255,255,0.7)",
             )
 
@@ -169,6 +169,6 @@ def build_volcano_figure(
         yaxis_title="-Log10 p-value",
         legend_title="",
         template="plotly_white",
-        margin=dict(t=50, b=40),
+        margin={"t": 50, "b": 40},
     )
     return fig

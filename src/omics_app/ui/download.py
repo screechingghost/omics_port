@@ -30,11 +30,12 @@ hierarchy. This restructures the same content, not new content:
 # pyright: reportCallIssue=false, reportInvalidTypeForm=false
 import dash_bootstrap_components as dbc
 from dash import html
+from dash.development.base_component import Component
 
 
 def _download_card(
     icon_title: str, button_label: str, description: str, color: str, accent: str
-) -> dbc.Col:
+) -> Component:
     return dbc.Col(
         dbc.Card(
             dbc.CardBody(

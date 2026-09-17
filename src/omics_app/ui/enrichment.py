@@ -474,7 +474,7 @@ def render_enrichment_table(enrichment_results, comp_name):
 
     return dash_table.DataTable(
         columns=[{"name": c, "id": c} for c in display_cols],
-        data=df.to_dict("records"),
+        data=df.to_dict("records"),  # type: ignore
         page_size=15,
         sort_action="native",
         filter_action="native",

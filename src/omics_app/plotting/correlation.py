@@ -60,7 +60,7 @@ def build_correlation_figure(
             zmax=1,
             text=np.round(values, 2) if show_values else None,
             texttemplate="%{text}" if show_values else None,
-            colorbar=dict(title=method.capitalize()),
+            colorbar={"title": method.capitalize()},
         )
     )
     fig.update_yaxes(autorange="reversed")
@@ -68,6 +68,6 @@ def build_correlation_figure(
         title=f"Sample Correlation Heatmap ({method.capitalize()})",
         template="plotly_white",
         xaxis_tickangle=-45,
-        margin=dict(t=50, b=80),
+        margin={"t": 50, "b": 80},
     )
     return fig

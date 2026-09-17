@@ -49,6 +49,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 from dash import Input, Output, State, callback, dcc, html
+from dash.development.base_component import Component
 from dash.exceptions import PreventUpdate
 from PIL import Image
 
@@ -127,7 +128,7 @@ def _load_comparison(dea_results: dict | None, comp_name: str | None):
     }
 
 
-def _control(label: str, component, width=2) -> dbc.Col:
+def _control(label: str, component, width=2) -> Component:
     """One labeled control in a settings toolbar -- small caption label
     above a compact input, laid out inline instead of the previous
     stacked full-width sidebar controls."""

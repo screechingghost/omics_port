@@ -137,7 +137,7 @@ def build_heatmap_figure(
             y=row_labels,
             colorscale="RdYlBu_r",
             zmid=0,
-            colorbar=dict(title="Scaled<br>Abundance"),
+            colorbar={"title": "Scaled<br>Abundance"},
         )
     )
     fig.update_xaxes(tickangle=-45)
@@ -145,6 +145,6 @@ def build_heatmap_figure(
     fig.update_layout(
         title=f"Heatmap ({len(selected)} proteins, mode={heatmap_mode})",
         template="plotly_white",
-        margin=dict(t=50, b=80),
+        margin={"t": 50, "b": 80},
     )
     return fig

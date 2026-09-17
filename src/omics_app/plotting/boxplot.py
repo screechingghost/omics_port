@@ -66,7 +66,7 @@ def build_boxplot_figure(
                     x=[None],
                     y=[None],
                     mode="markers",
-                    marker=dict(color=color, size=10),
+                    marker={"color": color, "size": 10},
                     name=group,
                     legendgroup=group,
                     showlegend=True,
@@ -79,6 +79,6 @@ def build_boxplot_figure(
         xaxis_title="Samples",
         template="plotly_white",
         xaxis_tickangle=-45,
-        margin=dict(t=50, b=80),
+        margin={"t": 50, "b": 80},
     )
     return fig

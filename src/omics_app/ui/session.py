@@ -26,6 +26,7 @@ from importlib import metadata as importlib_metadata
 
 import dash_bootstrap_components as dbc
 from dash import Input, Output, callback, html
+from dash.development.base_component import Component
 
 _METHOD_LABELS = {"normal": "T-Test", "anova": "ANOVA (Multi-Group)"}
 
@@ -56,7 +57,7 @@ def _package_versions() -> list[tuple[str, str]]:
     return versions
 
 
-def _info_card(title: str, body_id: str, placeholder: str) -> dbc.Card:
+def _info_card(title: str, body_id: str, placeholder: str) -> Component:
     return dbc.Card(
         dbc.CardBody(
             [

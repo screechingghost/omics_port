@@ -6,6 +6,7 @@ import uuid
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import Input, Output, State, callback, ctx, dash_table, dcc, html, no_update
+from dash.development.base_component import Component
 
 from omics_app.data.columns import build_main_data_index
 from omics_app.server import cache
@@ -693,7 +694,7 @@ def _column_badge_row(label: str, columns: list[str], accent: str) -> html.Div:
     )
 
 
-def _info_stat(label: str, value, accent: str) -> dbc.Col:
+def _info_stat(label: str, value, accent: str) -> Component:
     return dbc.Col(
         html.Div(
             [

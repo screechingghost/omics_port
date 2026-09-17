@@ -92,7 +92,7 @@ def build_pca_figure(
                 name=group,
                 text=sub["Sample"] if show_labels else None,
                 textposition="top center",
-                marker=dict(size=10, color=color),
+                marker={"size": 10, "color": color},
             )
         )
         if show_ellipses:
@@ -103,7 +103,7 @@ def build_pca_figure(
                         x=ellipse[0],
                         y=ellipse[1],
                         mode="lines",
-                        line=dict(color=color, dash="dot"),
+                        line={"color": color, "dash": "dot"},
                         showlegend=False,
                         hoverinfo="skip",
                     )
@@ -114,6 +114,6 @@ def build_pca_figure(
         xaxis_title=f"PC{pc1} ({var_exp[pc1 - 1]:.1f}%)",
         yaxis_title=f"PC{pc2} ({var_exp[pc2 - 1]:.1f}%)",
         template="plotly_white",
-        margin=dict(t=50, b=40),
+        margin={"t": 50, "b": 40},
     )
     return fig
